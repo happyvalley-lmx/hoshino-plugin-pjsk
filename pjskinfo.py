@@ -33,6 +33,7 @@ def data_req(url):  #现场请求相关数据，耗时较长，但是数据永�
     re = json.loads(temp_res.text)
     return re
 
+# 遍历账号池对比UID，若已有绑定返回False
 def a_check(uid,account): #bot, ev: CQEvent
     n_a = len(account)
     for a in range(n_a):
@@ -78,11 +79,7 @@ async def reg(bot, ev: CQEvent):
     except:
         await bot.send(ev,f"绑定发生错误",at_sender = True)
 
-
-
-
-
-
+#获取PJSKID,若不存在返回FALSE(0)
 async def lg(user_id):  
     uid = user_id
 
@@ -97,16 +94,14 @@ async def lg(user_id):
         else:
             return  0
 
-
-
-
+# 从全部卡面中遍历获取ID对应的图片资源，并从API中获取后return
 async def getLeaderIcon(data1):
     leaderId = data1['userDecks'][0]["leader"]
     for  level in data1["userCards"]:
         if leaderId == level["cardId"]:
             card_type = level["defaultImage"]
             break
-    getCd = req.get('https://database.pjsekai.moe/cards.json')
+    getCd = req.get('https://database.pjsekai.moe/cards.json') # 返回全部卡面信息的API
     cards_infomation = json.loads(getCd.text)
     for sc in cards_infomation:
         if leaderId == sc["id"]:
