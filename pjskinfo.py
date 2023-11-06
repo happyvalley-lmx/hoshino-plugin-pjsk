@@ -136,7 +136,7 @@ async def countClear(_list,difficulty,data1):
                     _list.append(result['musicId'])
     for a in _list:
         if _list.count(a) >= 2:
-            a_count = account - _list.count(a) + 1
+            a_count = a_count - _list.count(a) + 1
     return _list,a_count
 
 @sv.on_prefix("/pjskpf")
@@ -168,7 +168,7 @@ async def pj_profileGet(bot,ev:CQEvent):
         await bot.send(ev,f"没有绑定捏\n输入“/pjsk绑定+pjskID”来绑定吧~")
     else:
         try:
-            url = f'https://api.pjsekai.moe/api/user/{userID}/profile'
+            url = f'https://api.unipjsk.com/api/user/{userID}/profile'
             getdata = req.get(url)
             data1 = json.loads(getdata.text)
 
