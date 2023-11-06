@@ -112,8 +112,6 @@ async def getLeaderIcon(data1):
             l_icon = req.get(url)
             return l_icon
 
-    
-
 async def countFlg(_list,TAG,difficulty,data1):
     a_count = 0
     for result in data1['userMusicResults']:
@@ -122,7 +120,6 @@ async def countFlg(_list,TAG,difficulty,data1):
                     a_count = a_count + 1
                     _list.append(result['musicId'])
     return _list,a_count
-
 
 async def countClear(_list,difficulty,data1):
     a_count = 0
@@ -139,7 +136,7 @@ async def countClear(_list,difficulty,data1):
             a_count = a_count - _list.count(a) + 1
     return _list,a_count
 
-@sv.on_prefix("/pjskpf")
+@sv.on_prefix(("/pjskpf","/个人信息"))
 async def pj_profileGet(bot,ev:CQEvent):
     #逮捕
     uid = ev.user_id
@@ -174,22 +171,27 @@ async def pj_profileGet(bot,ev:CQEvent):
 
 
             dict_backup=[]
-            difficulty = ['easy','normal','hard','expert','master']
+            difficulty = ['easy','normal','hard','expert','master'] #TODO: APD难度
             for tag in difficulty:
-                count = 0
+                clr_count = 0
                 fc_count = 0
                 ap_count = 0
-                clr_list = []
-                fc_list = []
-                ap_list = []
-                fc_list,fc_count = await countFlg(fc_list,'fullComboFlg',tag,data1)
-                ap_list,ap_count = await countFlg(ap_list,'fullPerfectFlg',tag,data1)
-                clr_list,count = await countClear(clr_list,tag,data1)
+                # clr_list = []
+                # fc_list = []
+                # ap_list = []
 
-                dict_backup.append({tag:{'fc':fc_count,'ap':ap_count,'clear':count}})
+                # 旧API不再使用，改用新API直接返回数据
+                # fc_list,fc_count = await countFlg(fc_list,'fullComboFlg',tag,data1)
+                # ap_list,ap_count = await countFlg(ap_list,'fullPerfectFlg',tag,data1)
+                # clr_list,clr_count = await countClear(clr_list,tag,data1)
+                for result in data1['userMusicDifficultyClearCount']:
+                    if result['musicDifficultyType'] == tag:
+                        fc_count = result['fullCombo']
+                        ap_count = result['allPerfect']
+                        clr_count = result['liveClear']
+
+                dict_backup.append({tag:{'fc':fc_count,'ap':ap_count,'clear':clr_count}})
             #print(dict_backup)
-
-
             
             profile_image= Image.open(load_path+'\\test1.png')
             new_pimage = load_path+'\\pjprofile.png'
@@ -207,14 +209,14 @@ async def pj_profileGet(bot,ev:CQEvent):
             draw_icon = ImageDraw.Draw(picon)
             
             #防止部分玩家ID过大导致其以期望外的方式生成
-            u = data1['user']['userGamedata']['name'].encode("utf-8")
+            u = data1['user']['name'].encode("utf-8")
             if len(u) < 18:
-                draw.text((281,130),data1['user']['userGamedata']['name'],'#FFFFFF',font=name_font)
+                draw.text((281,130),data1['user']['name'],'#FFFFFF',font=name_font)
             else:
                 name_font = ImageFont.truetype(load_path+'\\zzaw.ttf',size=48)
-                draw.text((281,162),data1['user']['userGamedata']['name'],'#FFFFFF',font=name_font)
+                draw.text((281,162),data1['user']['name'],'#FFFFFF',font=name_font)
 
-            draw.text((404,231),str(data1['user']['userGamedata']['rank']),'#FFFFFF',font=rank_font)
+            draw.text((404,231),str(data1['user']['rank']),'#FFFFFF',font=rank_font)
 
 
 
@@ -297,108 +299,110 @@ def load_event_info(_data):
     if time.time() > close_time: #说明倒数第二个活动已关闭，按最新的算
         i = -1
     return _data[i]['id'], _data[i]['name'], time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(_data[i]["aggregateAt"]/1000))),  _data[i]['eventType']
-            
-@sv.on_prefix("/sk")
-async def event_rank(bot,ev:CQEvent):    
-    uid = ev.user_id
-    userid = await lg(uid)
-    if userid == 0:
-        await bot.send(ev,f"没有绑定捏\n输入“/pjsk绑定+pjskID”来绑定吧~")
-    else:
-        try:
-            _data = data_req(url_e_data)
-            event_id, event_name, event_end_time, e_type = load_event_info(_data)
-            url1 = f'https://api.pjsekai.moe/api/user/%7Buser_id%7D/event/{event_id}/ranking?targetUserId={userid}'
 
-            user_event_data = req.get(url1, headers=headers)
-            _event_data = json.loads(user_event_data.text)
-            try:
-                user_event_rank = _event_data['rankings'][0]['rank']  #你的try嵌套错地方了，如果没打活动这里就取不到值了
-                user_event_score = _event_data['rankings'][0]['score']  #所以生成消息那边嵌套的try实际没有用
-            except:
-                await bot.send(ev, '小可爱你还没打活动查什么呢', at_sender = True) 
-                return  #利用return结束
-            nearest_line = []
-            event_line = [100, 200, 500,
-                        1000, 2000, 5000,
-                        10000, 20000, 50000,
-                        100000, 200000, 500000,
-                        1000000, 2000000, 5000000]
+# 因为API限制，无法查排名了            
+# @sv.on_prefix("/sk")
+# async def event_rank(bot,ev:CQEvent):    
+#     uid = ev.user_id
+#     userid = await lg(uid)
+#     if userid == 0:
+#         await bot.send(ev,f"没有绑定捏\n输入“/pjsk绑定+pjskID”来绑定吧~")
+#     else:
+#         try:
+#             _data = data_req(url_e_data)
+#             event_id, event_name, event_end_time, e_type = load_event_info(_data)
+#             url1 = f'https://api.pjsekai.moe/api/user/%7Buser_id%7D/event/{event_id}/ranking?targetUserId={userid}'
 
-            for a in range(len(event_line)):
-                if int(event_line[a]) >= user_event_rank:
-                    if a != 0:
-                        nearest_line.append(event_line[a-1])
-                    nearest_line.append(event_line[a])
-                    break
-            else:
-                nearest_line.append(event_line[-1])
+#             user_event_data = req.get(url1, headers=headers)
+#             _event_data = json.loads(user_event_data.text)
+#             try:
+#                 user_event_rank = _event_data['rankings'][0]['rank']  #你的try嵌套错地方了，如果没打活动这里就取不到值了
+#                 user_event_score = _event_data['rankings'][0]['score']  #所以生成消息那边嵌套的try实际没有用
+#             except:
+#                 await bot.send(ev, '小可爱你还没打活动查什么呢', at_sender = True) 
+#                 return  #利用return结束
+#             nearest_line = []
+#             event_line = [100, 200, 500,
+#                         1000, 2000, 5000,
+#                         10000, 20000, 50000,
+#                         100000, 200000, 500000,
+#                         1000000, 2000000, 5000000]
+
+#             for a in range(len(event_line)):
+#                 if int(event_line[a]) >= user_event_rank:
+#                     if a != 0:
+#                         nearest_line.append(event_line[a-1])
+#                     nearest_line.append(event_line[a])
+#                     break
+#             else:
+#                 nearest_line.append(event_line[-1])
                                 
-            msg = f"当前活动:{event_name}\n活动类型:{e_type}\n活动截止时间:{event_end_time}\n你的分数:{str(user_event_score)} rank#{str(user_event_rank)}\n最近的分数线:"
-            for i in nearest_line:
-                try:
-                    url2 = f'https://api.pjsekai.moe/api/user/%7Buser_id%7D/event/{event_id}/ranking?targetRank={i}'
-                    event_line_data = req.get(url2, headers=headers)
-                    _event_line_data = json.loads(event_line_data.text)
-                    msg += f"\nrank#{i} {str(_event_line_data['rankings'][0]['score'])}"
-                except:
-                    msg += f"\nrank#{i} 最近的分数线:暂无数据"
+#             msg = f"当前活动:{event_name}\n活动类型:{e_type}\n活动截止时间:{event_end_time}\n你的分数:{str(user_event_score)} rank#{str(user_event_rank)}\n最近的分数线:"
+#             for i in nearest_line:
+#                 try:
+#                     url2 = f'https://api.pjsekai.moe/api/user/%7Buser_id%7D/event/{event_id}/ranking?targetRank={i}'
+#                     event_line_data = req.get(url2, headers=headers)
+#                     _event_line_data = json.loads(event_line_data.text)
+#                     msg += f"\nrank#{i} {str(_event_line_data['rankings'][0]['score'])}"
+#                 except:
+#                     msg += f"\nrank#{i} 最近的分数线:暂无数据"
 
-        except Exception as e:
-            msg = f"发生错误，错误类型：{type(e)}\n请联系管理员"
-            print(e)
-        await bot.send(ev, msg, at_sender = True)    
+#         except Exception as e:
+#             msg = f"发生错误，错误类型：{type(e)}\n请联系管理员"
+#             print(e)
+#         await bot.send(ev, msg, at_sender = True)    
     
 def load_req_line(string:str):
     return string.replace('k', '000').replace('K', '000').replace('w', '0000').replace('W', '0000')
-    
-@sv.on_prefix('/pjsk档线')
-async def event_line_score(bot, ev):
-    try:
-        req_line = load_req_line(ev.message.extract_plain_text().strip())
-    except:
-        req_line = 0
-    try:
-        _data = data_req(url_e_data)
-        event_id, event_name, event_end_time, e_type = load_event_info(_data)
+
+# TODO:档线
+# @sv.on_prefix('/pjsk档线')
+# async def event_line_score(bot, ev):
+#     try:
+#         req_line = load_req_line(ev.message.extract_plain_text().strip())
+#     except:
+#         req_line = 0
+#     try:
+#         _data = data_req(url_e_data)
+#         event_id, event_name, event_end_time, e_type = load_event_info(_data)
         
-        #line_score = []
-        if req_line ==0:
-            event_line = [100, 200, 500,
-                    1000, 2000, 5000,
-                    10000, 20000, 50000,
-                    100000, 200000, 500000, 1000000]
-            event_line_msg = ['100', '200', '500',
-                    '1k', '2k', '5k',
-                    '1w', '2w', '5w',
-                    '10w', '20w', '50w', '100w']
-            index = 0
-            msg = f'活动标题：{event_name}\n活动类型:{e_type}'
-            for line in event_line:
-                url2 = f'https://api.pjsekai.moe/api/user/%7Buser_id%7D/event/{event_id}/ranking?targetRank={line}'
-                event_line_data = data_req(url2)
-                try:
-                    #line_score.append(str(event_line_data['rankings'][0]['score']))  #预留后期图像化
-                    line_score = event_line_data['rankings'][0]['score']
-                    msg += f'\n{event_line_msg[index]}线:{line_score}'
-                except:
-                    #line_score.append('暂无数据')
-                    msg += f'\n{event_line_msg[index]}线:暂无数据'
-                index += 1
-        else:
-            msg = f'活动标题：{event_name}\n活动类型:{e_type}'
-            url2 = f'https://api.pjsekai.moe/api/user/%7Buser_id%7D/event/{event_id}/ranking?targetRank={req_line}'
-            event_line_data = data_req(url2)
-            try:
-                line_score = event_line_data['rankings'][0]['score']
-                msg += f'\n{req_line}线:{line_score}'
-            except:
-                msg += f'\n{req_line}线:暂无数据'
-    except Exception as e:
-        print(e)
-        msg = f"发生错误，错误类型：{type(e)}\n请联系管理员"
+#         #line_score = []
+#         if req_line ==0:
+#             event_line = [100, 200, 500,
+#                     1000, 2000, 5000,
+#                     10000, 20000, 50000,
+#                     100000, 200000, 500000, 1000000]
+#             event_line_msg = ['100', '200', '500',
+#                     '1k', '2k', '5k',
+#                     '1w', '2w', '5w',
+#                     '10w', '20w', '50w', '100w']
+#             index = 0
+#             msg = f'活动标题：{event_name}\n活动类型:{e_type}'
+#             for line in event_line:
+#                 url2 = f'https://api.pjsekai.moe/api/user/%7Buser_id%7D/event/{event_id}/ranking?targetRank={line}'
+#                 event_line_data = data_req(url2)
+#                 try:
+#                     #line_score.append(str(event_line_data['rankings'][0]['score']))  #预留后期图像化
+#                     line_score = event_line_data['rankings'][0]['score']
+#                     msg += f'\n{event_line_msg[index]}线:{line_score}'
+#                 except:
+#                     #line_score.append('暂无数据')
+#                     msg += f'\n{event_line_msg[index]}线:暂无数据'
+#                 index += 1
+#         else:
+#             msg = f'活动标题：{event_name}\n活动类型:{e_type}'
+#             url2 = f'https://api.pjsekai.moe/api/user/%7Buser_id%7D/event/{event_id}/ranking?targetRank={req_line}'
+#             event_line_data = data_req(url2)
+#             try:
+#                 line_score = event_line_data['rankings'][0]['score']
+#                 msg += f'\n{req_line}线:{line_score}'
+#             except:
+#                 msg += f'\n{req_line}线:暂无数据'
+#     except Exception as e:
+#         print(e)
+#         msg = f"发生错误，错误类型：{type(e)}\n请联系管理员"
         
-    await bot.send(ev, msg, at_sender = True)  
+#     await bot.send(ev, msg, at_sender = True)  
 
 async def pj_musicCompletedDataGet(uid,data1):
     difficulty = 'master'
@@ -457,94 +461,94 @@ async def get_usericon(user):
         p_icon = req.get(f'https://q1.qlogo.cn/g?b=qq&nk={user}&s=640')
         return p_icon
 
-@sv.on_prefix("/pjsk进度")
-async def gen_pjsk_jindu_image(bot,ev:CQEvent):
-    #逮捕
-    uid = ev.user_id
-    userID = await lg(uid)
+# @sv.on_prefix("/pjsk进度")
+# async def gen_pjsk_jindu_image(bot,ev:CQEvent):
+#     #逮捕
+#     uid = ev.user_id
+#     userID = await lg(uid)
 
-    selection = 0
+#     selection = 0
     
-    for i in ev.message:
-        if i.type == 'at':
-            uid = int(i.data['qq'])
-            userID = await lg(uid)
-            break
+#     for i in ev.message:
+#         if i.type == 'at':
+#             uid = int(i.data['qq'])
+#             userID = await lg(uid)
+#             break
 
-    _uID = ev.message.extract_plain_text().strip()
-    if _uID != "":
-        _userID = int(_uID)
-        if isinstance(_userID,int) and _userID > 1000000000000000:
-            userID = _userID
-            selection = 1
-        else:
-            return await bot.send(ev,f'UID格式错误')
-
-
-
-    if userID == 0:
-        await bot.send(ev,f"没有绑定捏\n输入“/pjsk绑定+pjskID”来绑定吧~")
-
-    else:
-        try:
-            url = f'https://api.pjsekai.moe/api/user/{str(userID)}/profile'
-            getdata = req.get(url)
-            data1 = json.loads(getdata.text)
-
-            _clr,_all,_fc,_ap = await pj_musicCompletedDataGet(uid,data1)
-            image1 = Image.open(load_path+f'\\test.png')
-            new_image =load_path+f'\\pjskjindu.png'
+#     _uID = ev.message.extract_plain_text().strip()
+#     if _uID != "":
+#         _userID = int(_uID)
+#         if isinstance(_userID,int) and _userID > 1000000000000000:
+#             userID = _userID
+#             selection = 1
+#         else:
+#             return await bot.send(ev,f'UID格式错误')
 
 
-            if selection == 0:
-                icon = Image.open(BytesIO((await get_usericon(f'{uid}')).content)) #####
-            else:
-                icon = Image.open(BytesIO((await getLeaderIcon(data1)).content))
 
-            font = ImageFont.truetype(load_path+f'\\CAT.TTF',size=40)
-            font1 = ImageFont.truetype(load_path+f'\\zzaw.ttf',size=50)
-            font2 = ImageFont.truetype(load_path+f'\\CAT.TTF',size=36)
-            draw = ImageDraw.Draw(image1)
+#     if userID == 0:
+#         await bot.send(ev,f"没有绑定捏\n输入“/pjsk绑定+pjskID”来绑定吧~")
 
-            u = data1['user']['userGamedata']['name'].encode("utf-8")
-            if len(u) < 18:
-                draw.text((214,75),data1['user']['userGamedata']['name'],'#000000',font=font1)
-            else:
-                font1 = ImageFont.truetype(load_path+f'\\zzaw.ttf',size=30)
-                draw.text((214,95),data1['user']['userGamedata']['name'],'#000000',font=font1)
+#     else:
+#         try:
+#             url = f'https://api.pjsekai.moe/api/user/{str(userID)}/profile'
+#             getdata = req.get(url)
+#             data1 = json.loads(getdata.text)
 
-            draw.text((315,135),str(data1['user']['userGamedata']['rank']), "#FFFFFF",font=font2)
-            icon = icon.resize((117,117),Image.Resampling.LANCZOS)
-            image1.paste(icon, (67,57))
+#             _clr,_all,_fc,_ap = await pj_musicCompletedDataGet(uid,data1)
+#             image1 = Image.open(load_path+f'\\test.png')
+#             new_image =load_path+f'\\pjskjindu.png'
 
-            for i in _ap[0]:
-                if i <= '31':
-                    draw.text((167,284+(97*(int(i)-26))),str(_ap[0][i]), color["ap"],font=font)
-                else:
-                    draw.text((667,284+(97*(int(i)-32))),str(_ap[0][i]), color["ap"],font=font)
-            for i in _fc[0]:
-                if i <= '31':
-                    draw.text((242,284+(97*(int(i)-26))),str(_fc[0][i]), color["fc"],font=font)
-                else:
-                    draw.text((742,284+(97*(int(i)-32))),str(_fc[0][i]), color["fc"],font=font)
+
+#             if selection == 0:
+#                 icon = Image.open(BytesIO((await get_usericon(f'{uid}')).content)) #####
+#             else:
+#                 icon = Image.open(BytesIO((await getLeaderIcon(data1)).content))
+
+#             font = ImageFont.truetype(load_path+f'\\CAT.TTF',size=40)
+#             font1 = ImageFont.truetype(load_path+f'\\zzaw.ttf',size=50)
+#             font2 = ImageFont.truetype(load_path+f'\\CAT.TTF',size=36)
+#             draw = ImageDraw.Draw(image1)
+
+#             u = data1['user']['name'].encode("utf-8")
+#             if len(u) < 18:
+#                 draw.text((214,75),data1['user']['name'],'#000000',font=font1)
+#             else:
+#                 font1 = ImageFont.truetype(load_path+f'\\zzaw.ttf',size=30)
+#                 draw.text((214,95),data1['user']['name'],'#000000',font=font1)
+
+#             draw.text((315,135),str(data1['user']['rank']), "#FFFFFF",font=font2)
+#             icon = icon.resize((117,117),Image.Resampling.LANCZOS)
+#             image1.paste(icon, (67,57))
+
+#             for i in _ap[0]:
+#                 if i <= '31':
+#                     draw.text((167,284+(97*(int(i)-26))),str(_ap[0][i]), color["ap"],font=font)
+#                 else:
+#                     draw.text((667,284+(97*(int(i)-32))),str(_ap[0][i]), color["ap"],font=font)
+#             for i in _fc[0]:
+#                 if i <= '31':
+#                     draw.text((242,284+(97*(int(i)-26))),str(_fc[0][i]), color["fc"],font=font)
+#                 else:
+#                     draw.text((742,284+(97*(int(i)-32))),str(_fc[0][i]), color["fc"],font=font)
             
-            for i in _clr[0]:
-                if i <= '31':
-                    draw.text((317,284+(97*(int(i)-26))),str(_clr[0][i]), color["clr"],font=font)
-                else:
-                    draw.text((817,284+(97*(int(i)-32))),str(_clr[0][i]), color["clr"],font=font)
-            for i in _all[0]:
-                if i <= '31':
-                    draw.text((392,284+(97*(int(i)-26))),str(_all[0][i]), color["all"],font=font)
-                else:
-                    draw.text((892,284+(97*(int(i)-32))),str(_all[0][i]), color["all"],font=font)
+#             for i in _clr[0]:
+#                 if i <= '31':
+#                     draw.text((317,284+(97*(int(i)-26))),str(_clr[0][i]), color["clr"],font=font)
+#                 else:
+#                     draw.text((817,284+(97*(int(i)-32))),str(_clr[0][i]), color["clr"],font=font)
+#             for i in _all[0]:
+#                 if i <= '31':
+#                     draw.text((392,284+(97*(int(i)-26))),str(_all[0][i]), color["all"],font=font)
+#                 else:
+#                     draw.text((892,284+(97*(int(i)-32))),str(_all[0][i]), color["all"],font=font)
             
-            buf = BytesIO()
-            image1.save(buf, format='PNG')
-            base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}'
-            await bot.send(ev,f'[CQ:image,file={base64_str}]',at_sender = True)
-        except:
-            await bot.send(ev,f"api或服务器可能寄了 或者你这个小可爱填错别人ID 不然一般是不会出现意料之外的问题的！ \n请及时联系管理员看看发生什么事了")
+#             buf = BytesIO()
+#             image1.save(buf, format='PNG')
+#             base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}'
+#             await bot.send(ev,f'[CQ:image,file={base64_str}]',at_sender = True)
+#         except:
+#             await bot.send(ev,f"api或服务器可能寄了 或者你这个小可爱填错别人ID 不然一般是不会出现意料之外的问题的！ \n请及时联系管理员看看发生什么事了")
 
 
 '''
