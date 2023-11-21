@@ -3,12 +3,15 @@ import requests as req
 import os
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import re
+import traceback
 from io import BytesIO
-import codecs
+import pymysql
+import datetime
 
 from hoshino.typing import CQEvent, MessageSegment
-from hoshino import Service, priv, config
+from hoshino import Service, priv, config, get_self_ids, get_bot
 
+from .config import bot_db
 import asyncio
 
 sv = Service(
@@ -28,71 +31,119 @@ url_e_data = 'https://database.pjsekai.moe/events.json'
 color={"ap":"#d89aef","fc":"#ef8cee","clr":"#f0d873","all":"#6be1d9"}
 load_path = os.path.dirname(__file__)     #更改为自动获取
 
+async def get_usericon(user):
+    """通过Q号获取QQ头像。"""
+    p_icon = req.get(f'https://q1.qlogo.cn/g?b=qq&nk={user}&s=640')
+    return p_icon
+
 def data_req(url):  #现场请求相关数据，耗时较长，但是数据永远是最新的
     temp_res = req.get(url, headers = headers)
     re = json.loads(temp_res.text)
     return re
 
-# 遍历账号池对比UID，若已有绑定返回False
-def a_check(uid,account): #bot, ev: CQEvent
-    n_a = len(account)
-    for a in range(n_a):
-        if uid != account[a]["qqid"]:
-            continue
+# # 遍历账号池对比UID，若已有绑定返回False
+# def a_check(uid,account): #bot, ev: CQEvent
+#     n_a = len(account)
+#     for a in range(n_a):
+#         if uid != account[a]["qqid"]:
+#             continue
+#         else:
+#             return False
+#     else:
+#         return True
+    
+async def pjsk_uid_check(pjsk_uid):
+    url = f'https://api.unipjsk.com/api/user/{pjsk_uid}/profile'
+    getdata = req.get(url)
+    try:
+        data1 = json.loads(getdata.text)
+        u = data1['user']['name']
+        return u
+    except:
+        return False
+
+
+@sv.on_prefix(('/pjsk绑定'))
+async def pjsk_bind(bot, ev: CQEvent):
+    #绑定PJSK ID到QQ上（使用本地数据库）
+    input_id_raw = ev.message.extract_plain_text().strip()
+    if len(input_id_raw) == 0:
+        await bot.send(ev, '请输入您的PJSK ID！')
+    elif input_id_raw.isdigit() == True:
+        input_id = int(input_id_raw)
+        u_name = await pjsk_uid_check(input_id)
+        if not u_name:
+            await bot.send(ev, "无法查询到对应UID绑定的PJSK账号，请检查您的PJSK UID是否正确")
+            return 0
+        db_bot = pymysql.connect(
+            host=bot_db.host,
+            port=bot_db.port,
+            user=bot_db.user,
+            password=bot_db.password,
+            database=bot_db.database
+        )
+        apu_cursor = db_bot.cursor()
+        qqid = ev.user_id
+        apu_getuid_sql = "SELECT QQ,pjsk_uid FROM grxx WHERE QQ = %s" % (qqid)
+        # 先执行一次查询，查询是否已经签到注册过
+        try:
+            apu_cursor.execute(apu_getuid_sql)
+            result_cx = apu_cursor.fetchall()
+            apu_bind_sql = "UPDATE `grxx` SET `pjsk_uid`='%s' WHERE `QQ`='%s'" % (input_id, qqid)
+            if not result_cx:
+                await bot.send(ev, "无法查询到您的数据，请先发送“签到”来注册bot功能", at_sender = True)
+            elif result_cx[0][1] == None:
+                # 在此后进行绑定语句编程
+                try:
+                    apu_cursor.execute(apu_bind_sql)
+                    db_bot.commit()
+                    await bot.send(ev, f'已为您绑定成功账号:{u_name}')
+                except Exception as e:
+                    await bot.send(ev, f'绑定过程中发生错误:{e}')
+            else:
+                await bot.send(ev, f'您已经绑定过了，即将为您重新绑定')
+                try:
+                    apu_cursor.execute(apu_bind_sql)
+                    db_bot.commit()
+                    await bot.send(ev, f'已为您绑定成功账号:{u_name}')
+                except Exception as e:
+                    await bot.send(ev, f'重新绑定过程中发生错误:{e}')
+        except Exception as e:
+            await bot.send(ev, f'查询过程中发生错误:{e}')
+        db_bot.close()
+    else:
+        await bot.send(ev, '请输入纯数字的PJSK ID')
+
+async def lg(user_id):  
+    """获取PJSK昵称ID的函数。
+
+    若玩家不存在，则返回``FALSE``。
+    ``user_id``:纯数字的PJSK_ID
+    """
+    qqid = user_id
+    db_bot = pymysql.connect(
+        host=bot_db.host,
+        port=bot_db.port,
+        user=bot_db.user,
+        password=bot_db.password,
+        database=bot_db.database
+    )
+    apu_cursor = db_bot.cursor()
+    apu_getuid_sql = "SELECT QQ,pjsk_uid FROM grxx WHERE QQ = %s" % (qqid)
+    # 先执行一次查询，查询是否已经签到注册过
+    try:
+        apu_cursor.execute(apu_getuid_sql)
+        result_cx = apu_cursor.fetchall()
+        pjsk_uid = result_cx[0][1]
+        db_bot.close()
+        if pjsk_uid:
+            return pjsk_uid
         else:
             return False
-    else:
-        return True
-
-@sv.on_prefix("/pjsk绑定")
-async def reg(bot, ev: CQEvent):
-    ppid = ev.message.extract_plain_text().strip()
-    try:
-        pid = int(ppid)
-        uid = ev.user_id
-        print(pid)
-        if isinstance(pid,int) and pid > 1000000000000000:       #待优化
-            with open(load_path+f"\\account.json","r") as f:
-                account = json.load(f)
-            n_a = len(account)
-
-            if a_check(uid,account):
-                indexdata = []
-                for a in range(n_a):
-                    uuid = account[a]["qqid"]
-                    ppid = account[a]["pjskid"]
-                    account_dict = {'qqid' : uuid,
-                                    'pjskid' : ppid}
-                    indexdata.append(account_dict)
-                account_dict = {'qqid' : uid,
-                                'pjskid' : int(pid)}
-                indexdata.append(account_dict)
-
-                with open (load_path+'\\account.json', 'w', encoding='utf8') as f:
-                    json.dump(indexdata, f,indent =2, ensure_ascii=False)
-                
-                await bot.send(ev,f"绑定完成！",at_sender = True)
-            else:
-                await bot.send(ev,f"你已经绑定过！",at_sender = True)
-        else:
-            await bot.send(ev,f"UID格式错误",at_sender = True)
-    except:
-        await bot.send(ev,f"绑定发生错误",at_sender = True)
-
-#获取PJSKID,若不存在返回FALSE(0)
-async def lg(user_id):  
-    uid = user_id
-
-    with open(load_path+f'\\account.json', 'r') as fff:
-        udata = json.load(fff)
-        if not a_check(uid,udata):
-            for a in udata:
-                if  uid == a['qqid']:
-                    return a['pjskid']
-                else:
-                    continue
-        else:
-            return  0
+    except Exception as e:
+        print(e)
+        db_bot.close()
+        return 0
 
 # 从全部卡面中遍历获取ID对应的图片资源，并从API中获取后return
 async def getLeaderIcon(data1):
@@ -290,15 +341,85 @@ async def pj_profileGet(bot,ev:CQEvent):
             profile_image.save(buf, format='PNG')
             base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}' #通过BytesIO发送图片，无需生成本地文件
             await bot.send(ev,f'[CQ:image,file={base64_str}]',at_sender = True)
-        except:
-            await bot.send(ev,f"api或服务器可能寄了 或者你这个小可爱填错别人ID 不然一般是不会出现意料之外的问题的！ \n请及时联系管理员看看发生什么事了")
+        except Exception as e:
+            await bot.send(ev,f"查询个人信息过程出现问题:{e}")
+            traceback.print_exc()
 
-def load_event_info(_data):
-    i = -2
-    close_time = int(_data[i]["closedAt"]/1000) 
-    if time.time() > close_time: #说明倒数第二个活动已关闭，按最新的算
-        i = -1
-    return _data[i]['id'], _data[i]['name'], time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(_data[i]["aggregateAt"]/1000))),  _data[i]['eventType']
+# @sv.scheduled_job('interval', seconds=30)
+@sv.on_fullmatch(('/pjskcs','/参赛查询'))
+async def matching_list(bot,ev:CQEvent):
+    if not priv.check_priv(ev, priv.ADMIN):
+        await bot.send(ev,"目前仅管理员可查询参赛信息")
+        return
+    # bot = get_bot()
+    list_sql = "SELECT pjsk_uid, QQ from grxx WHERE pjsk_uid IS NOT NULL"
+    db_bot = pymysql.connect(
+        host=bot_db.host,
+        port=bot_db.port,
+        user=bot_db.user,
+        password=bot_db.password,
+        database=bot_db.database
+    )
+    apu_cursor = db_bot.cursor()
+    try:
+        apu_cursor.execute(list_sql)
+        cx_list = apu_cursor.fetchall()
+        print(cx_list)
+    except Exception as e:
+        print("查询参赛信息数据库过程出错，请稍后再试，或联系管理员咨询处理")
+        print(e)
+    db_bot.close()
+    try:
+        nowtime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        bm_list = f"截止至当前 {nowtime} 已报名信息:\n"
+        font = ImageFont.truetype(load_path+'\\simhei.ttf', 20)
+        left, top, right, bottom = font.getbbox(bm_list)
+        text_width = right - left
+        height = 20
+        num = 0
+        for single in cx_list:
+            num += 1
+            uid = single[0]
+            qqid = single[1]
+            u_name = await pjsk_uid_check(uid)
+            bm_list_add = f"{num}.昵称:{u_name} - QQ:{qqid}\n"
+            left_n, top_n, right_n, bottom_n = font.getbbox(bm_list_add)
+            if(right_n > right): # 更新最长的一行
+                right = right_n
+                text_width = right - left_n
+            bm_list += bm_list_add
+            height += 24 # 每行高度为20, 留白4
+        print(bm_list)
+
+        text_width += 20 # 给左右各留白10
+        height += 20 # 给上下各留白10
+        image = Image.new('RGB', (text_width, height), (0,0,0)) # 设置画布大小及背景色
+        draw = ImageDraw.Draw(image)
+
+        # 分行写入，避免换行时每行高度无法确认
+        bm_list_list = bm_list.split('\n')
+        for i in range(len(bm_list_list)):
+            text = bm_list_list[i]
+            draw.text((10, 10 + i * 24), text, 'white', font)
+
+        image.save(load_path + '\\bmlist.jpg') # 保存图片
+        data = open(load_path + f'\\bmlist.jpg', "rb")
+        base64_str = base64.b64encode(data.read())
+        img_b64 =  b'base64://' + base64_str
+        img_b64 = str(img_b64, encoding = "utf-8")
+
+        # await bot.send_group_msg(self_id=2407717967, group_id=908041977, message=f'[CQ:image,file={img_b64}]')
+        await bot.send(ev,f'[CQ:image,file={img_b64}]')
+
+    except Exception as error:
+        print(error)
+        traceback.print_exc()
+# def load_event_info(_data):
+#     i = -2
+#     close_time = int(_data[i]["closedAt"]/1000) 
+#     if time.time() > close_time: #说明倒数第二个活动已关闭，按最新的算
+#         i = -1
+#     return _data[i]['id'], _data[i]['name'], time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(_data[i]["aggregateAt"]/1000))),  _data[i]['eventType']
 
 # 因为API限制，无法查排名了            
 # @sv.on_prefix("/sk")
@@ -352,8 +473,8 @@ def load_event_info(_data):
 #             print(e)
 #         await bot.send(ev, msg, at_sender = True)    
     
-def load_req_line(string:str):
-    return string.replace('k', '000').replace('K', '000').replace('w', '0000').replace('W', '0000')
+# def load_req_line(string:str):
+#     return string.replace('k', '000').replace('K', '000').replace('w', '0000').replace('W', '0000')
 
 # TODO:档线
 # @sv.on_prefix('/pjsk档线')
@@ -404,62 +525,57 @@ def load_req_line(string:str):
         
 #     await bot.send(ev, msg, at_sender = True)  
 
-async def pj_musicCompletedDataGet(uid,data1):
-    difficulty = 'master'
-    count = 0
-    c_count = 0
-    p_count = 0
-    list1 = []
-    list2 = []
-    list3 = []
-    list4 = []
+# async def pj_musicCompletedDataGet(uid,data1):
+#     difficulty = 'master'
+#     count = 0
+#     c_count = 0
+#     p_count = 0
+#     list1 = []
+#     list2 = []
+#     list3 = []
+#     list4 = []
 
-    list1,c_count = await countFlg(list1,'fullComboFlg',difficulty,data1)
-    list2,p_count = await countFlg(list2,'fullPerfectFlg',difficulty,data1)
-    list4,count = await countClear(list4,difficulty,data1)
+#     list1,c_count = await countFlg(list1,'fullComboFlg',difficulty,data1)
+#     list2,p_count = await countFlg(list2,'fullPerfectFlg',difficulty,data1)
+#     list4,count = await countClear(list4,difficulty,data1)
 
-    _lv = data_req(url_getmD)
-    allMusic = data_req(url_getmc)
-    #按难度分类  
-    for _ in allMusic:
-            list3.append(_['id'])
+#     _lv = data_req(url_getmD)
+#     allMusic = data_req(url_getmc)
+#     #按难度分类  
+#     for _ in allMusic:
+#             list3.append(_['id'])
     
-    async def selectPlus(_list):
-        lv_s = {26:0,27:0,28:0,29:0,30:0,31:0,32:0,33:0,34:0,35:0,36:0}
-        for __lv in _lv:
-            if __lv['musicDifficulty'] == difficulty and __lv['musicId'] in _list:
-                lv_s[__lv['playLevel']] += 1
-        return lv_s
+#     async def selectPlus(_list):
+#         lv_s = {26:0,27:0,28:0,29:0,30:0,31:0,32:0,33:0,34:0,35:0,36:0}
+#         for __lv in _lv:
+#             if __lv['musicDifficulty'] == difficulty and __lv['musicId'] in _list:
+#                 lv_s[__lv['playLevel']] += 1
+#         return lv_s
     
-    lv1 = await selectPlus(list1)
-    lv2 = await selectPlus(list2)
-    lv3 = await selectPlus(list3)
-    lv4 = await selectPlus(list4)
+#     lv1 = await selectPlus(list1)
+#     lv2 = await selectPlus(list2)
+#     lv3 = await selectPlus(list3)
+#     lv4 = await selectPlus(list4)
     
     
-    async def change(lv):
-        re_lv1 = []
-        in_dex ={}
-        for i in range(26,37):
-            a = lv[i]
-            b = str(i)
-            in_dex[f"{b}"] = a
-            n_dex =in_dex
-        re_lv1.append(n_dex)     
-        return re_lv1   
+#     async def change(lv):
+#         re_lv1 = []
+#         in_dex ={}
+#         for i in range(26,37):
+#             a = lv[i]
+#             b = str(i)
+#             in_dex[f"{b}"] = a
+#             n_dex =in_dex
+#         re_lv1.append(n_dex)     
+#         return re_lv1   
     
-    re_lv1 = await change(lv1) #fc
-    re_lv2 = await change(lv2) #ap
-    _all = await change(lv3) #all
-    _clear = await change(lv4) #clear
+#     re_lv1 = await change(lv1) #fc
+#     re_lv2 = await change(lv2) #ap
+#     _all = await change(lv3) #all
+#     _clear = await change(lv4) #clear
     
 
-    return _clear,_all,re_lv1,re_lv2
-
-    
-async def get_usericon(user):
-        p_icon = req.get(f'https://q1.qlogo.cn/g?b=qq&nk={user}&s=640')
-        return p_icon
+#     return _clear,_all,re_lv1,re_lv2
 
 # @sv.on_prefix("/pjsk进度")
 # async def gen_pjsk_jindu_image(bot,ev:CQEvent):
@@ -551,15 +667,15 @@ async def get_usericon(user):
 #             await bot.send(ev,f"api或服务器可能寄了 或者你这个小可爱填错别人ID 不然一般是不会出现意料之外的问题的！ \n请及时联系管理员看看发生什么事了")
 
 
-'''
-userID = await lg(uid)
-url = f'https://api.pjsekai.moe/api/user/{userID}/profile'
-getdata = req.get(url)
-data1 = json.loads(getdata.text)
-#print(data1)
-'''
-''' 备份 给新功能测试
-loop = asyncio.get_event_loop() 
-loop.run_until_complete(pj_profileGet())
-loop.close()
-'''
+# '''
+# userID = await lg(uid)
+# url = f'https://api.pjsekai.moe/api/user/{userID}/profile'
+# getdata = req.get(url)
+# data1 = json.loads(getdata.text)
+# #print(data1)
+# '''
+# ''' 备份 给新功能测试
+# loop = asyncio.get_event_loop() 
+# loop.run_until_complete(pj_profileGet())
+# loop.close()
+# '''
