@@ -23,6 +23,29 @@ sv = Service(
     bundle = '娱乐', #属于哪一类
     )
     
+def circle_corner(img, radii):  #把原图片变成圆角，这个函数是从网上找的，原址 https://www.pyget.cn/p/185266
+    """
+    圆角处理
+    :param img: 源图象。
+    :param radii: 半径，如：30。
+    :return: 返回一个圆角处理后的图象。
+    """
+    # 画圆（用于分离4个角）
+    circle = Image.new('L', (radii * 2, radii * 2), 0)  # 创建一个黑色背景的画布
+    draw = ImageDraw.Draw(circle)
+    draw.ellipse((0, 0, radii * 2, radii * 2), fill=255)  # 画白色圆形
+    # 原图
+    img = img.convert("RGBA")
+    w, h = img.size
+    # 画4个角（将整圆分离为4个部分）
+    alpha = Image.new('L', img.size, 255)
+    alpha.paste(circle.crop((0, 0, radii, radii)), (0, 0))  # 左上角
+    alpha.paste(circle.crop((radii, 0, radii * 2, radii)), (w - radii, 0))  # 右上角
+    alpha.paste(circle.crop((radii, radii, radii * 2, radii * 2)), (w - radii, h - radii))  # 右下角
+    alpha.paste(circle.crop((0, radii, radii, radii * 2)), (0, h - radii))  # 左下角
+    # alpha.show()
+    img.putalpha(alpha)  # 白色区域透明可见，黑色区域不可见
+    return img
 
 headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36'}
 url_getmD = 'https://musics.pjsekai.moe/musicDifficulties.json'
@@ -346,7 +369,7 @@ async def pj_profileGet(bot,ev:CQEvent):
             traceback.print_exc()
 
 # @sv.scheduled_job('interval', seconds=30)
-@sv.on_fullmatch(('/pjskcs','/参赛查询'))
+@sv.on_fullmatch(('/pjskcs','参赛查询'))
 async def matching_list(bot,ev:CQEvent):
     if not priv.check_priv(ev, priv.ADMIN):
         await bot.send(ev,"目前仅管理员可查询参赛信息")
@@ -414,3 +437,80 @@ async def matching_list(bot,ev:CQEvent):
     except Exception as error:
         print(error)
         traceback.print_exc()
+
+@sv.on_fullmatch(('成绩查询'))
+async def matching_top(bot, ev:CQEvent):
+    # 1.获取全部成员成绩
+    list_sql = "SELECT * from pjsk WHERE (QQ AND song1) IS NOT NULL;"
+    db_bot = pymysql.connect(
+        host=bot_db.host,
+        port=bot_db.port,
+        user=bot_db.user,
+        password=bot_db.password,
+        database=bot_db.database
+    )
+    apu_cursor = db_bot.cursor()
+    try:
+        apu_cursor.execute(list_sql)
+        cx_list = apu_cursor.fetchall()
+    except Exception as e:
+        print(f"error:{e}")
+        return
+    # 2.对成绩进行提取、分数计算和绘图
+    # 获取列表的第二个元素
+    def takeSecond(elem):
+        return elem[1]
+    score_list = []
+    # 统分
+    for player in cx_list:
+        qq = player[0]
+        song1 = player[1].split()
+        s1_perfect = int(song1[0])
+        s1_great = int(song1[1])
+        s1_good = int(song1[2])
+        s1_bad = int(song1[3])
+        s1_miss = int(song1[4])
+        s1_score = s1_perfect * 3 + s1_great * 2 + s1_good
+        song2 = player[2].split()
+        s2_perfect = int(song2[0])
+        s2_great = int(song2[1])
+        s2_good = int(song2[2])
+        s2_bad = int(song2[3])
+        s2_miss = int(song2[4])
+        s2_score = s2_perfect * 3 + s2_great * 2 + s2_good
+        song3 = player[3].split()
+        s3_perfect = int(song3[0])
+        s3_great = int(song3[1])
+        s3_good = int(song3[2])
+        s3_bad = int(song3[3])
+        s3_miss = int(song3[4])
+        s3_score = s3_perfect * 3 + s3_great * 2 + s3_good
+        score_total = s1_score + s2_score + s3_score
+        score_list.append([qq,score_total])
+    score_list.sort(key=takeSecond,reverse=True)
+    # 绘图
+    image= Image.open(load_path+'\\PJSK_比赛查询.png')
+    draw = ImageDraw.Draw(image)
+    font_count = ImageFont.truetype(load_path + f"\\NotoSansSC-Regular.otf", 16)
+    i = 0
+    x_pos = 95
+    y_pos = 146
+    for single in score_list[:8]:
+        if i == 4:
+            i = 0
+            y_pos = 421
+        x_jacket = 236 * i
+        qqid = single[0]
+        score = single[1]
+        qq_img = Image.open(BytesIO((await get_usericon(f'{qqid}')).content)).resize((180,180))
+        qq_img = circle_corner(qq_img,20)
+        image.paste(qq_img,(x_pos+x_jacket,y_pos),qq_img)
+        draw.text((x_pos+x_jacket+15, y_pos+190), f'[Q号]{qqid}\n[分数]{score}', 'white', font_count)
+        i += 1
+    nowtime = datetime.datetime.today().isoformat(timespec='seconds')
+    draw.text((331,679), f'Generate by AkiyamaAkari Bot | 数据截止至: {nowtime}', 'black', font_count)
+    # 发送
+    buf = BytesIO()
+    image.save(buf, format='PNG')
+    base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}' #通过BytesIO发送图片，无需生成本地文件
+    await bot.send(ev,f'[CQ:image,file={base64_str}]',at_sender = True)
