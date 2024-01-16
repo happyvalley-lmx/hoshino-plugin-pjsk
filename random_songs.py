@@ -3,10 +3,20 @@ import requests
 import os
 load_path = os.path.dirname(__file__)     #更改为自动获取
 
-music_difficulties_raw = requests.get("https://sekai-world.github.io/sekai-master-db-diff/musicDifficulties.json")
-musics_raw = requests.get("https://sekai-world.github.io/sekai-master-db-diff/musics.json")
-music_difficulties = json.loads(music_difficulties_raw.content)
-musics = json.loads(musics_raw.content)
+def save_request(filename,byte):
+    with open(load_path+f'\\{filename}','wb') as f:
+        f.write(byte)
+
+try:
+    music_difficulties_raw = requests.get("https://sekai-world.github.io/sekai-master-db-diff/musicDifficulties.json").content
+    musics_raw = requests.get("https://sekai-world.github.io/sekai-master-db-diff/musics.json").content
+    save_request('musicDifficulties.json',music_difficulties_raw)
+    save_request('musics.json',musics_raw)
+except:
+    music_difficulties_raw = open(load_path + '\\musicDifficulties.json', encoding='UTF-8').read()
+    musics_raw = open(load_path + '\\musics.json', encoding='UTF-8').read()
+music_difficulties = json.loads(music_difficulties_raw)
+musics = json.loads(musics_raw)
 # print(musics)
 
 def id_search_song(music_id):
