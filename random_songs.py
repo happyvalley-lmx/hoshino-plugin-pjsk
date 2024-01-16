@@ -1,6 +1,7 @@
 import json
 import requests
 import os
+import random
 load_path = os.path.dirname(__file__)     #更改为自动获取
 
 def save_request(filename,byte):
@@ -78,4 +79,14 @@ def math_game(max_level,min_level):
                 math_musics.append([music_id,music_title,music_difficulty,music_level,music_assetbundleName])
 
 math_game(34,32)
-print(math_musics)
+
+def random_songs(num:int):
+    '''
+    从比赛曲目池中抽取n首歌
+    :param num: 抽取的歌曲数目
+    '''
+    result = random.sample(math_musics,num)
+    return result
+
+random_songs(7)
+random_songs(1)
