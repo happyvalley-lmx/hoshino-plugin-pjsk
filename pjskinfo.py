@@ -77,8 +77,8 @@ def data_req(url):  #现场请求相关数据，耗时较长，但是数据永�
     
 async def pjsk_uid_check(pjsk_uid):
     url = f'https://api.unipjsk.com/api/user/{pjsk_uid}/profile'
-    getdata = req.get(url)
     try:
+        getdata = req.get(url)
         data1 = json.loads(getdata.text)
         u = data1['user']['name']
         return u
@@ -96,7 +96,7 @@ async def pjsk_bind(bot, ev: CQEvent):
         input_id = int(input_id_raw)
         u_name = await pjsk_uid_check(input_id)
         if not u_name:
-            await bot.send(ev, "无法查询到对应UID绑定的PJSK账号，请检查您的PJSK UID是否正确")
+            await bot.send(ev, "无法查询到对应UID绑定的PJSK账号，请检查您的PJSK UID是否正确，或是当前Unibot数据API是否正常")
             return 0
         db_bot = pymysql.connect(
             host=bot_db.host,
@@ -400,17 +400,26 @@ async def matching_list(bot,ev:CQEvent):
         text_width = right - left
         height = 20
         num = 0
+        api_error = False
         for single in cx_list:
             num += 1
             uid = single[0]
             qqid = single[1]
             u_name = await pjsk_uid_check(uid)
-            bm_list_add = f"{num}.昵称:{u_name} - QQ:{qqid}\n"
+            if u_name == False:
+                u_name = str(uid)
+                bm_list_add = f"{num}.UID:{u_name} - QQ:{qqid}\n"
+                api_error = True
+            else:
+                bm_list_add = f"{num}.昵称:{u_name} - QQ:{qqid}\n"
             left_n, top_n, right_n, bottom_n = font.getbbox(bm_list_add)
             if(right_n > right): # 更新最长的一行
                 right = right_n
                 text_width = right - left_n
             bm_list += bm_list_add
+            height += 24 # 每行高度为20, 留白4
+        if api_error == True:
+            bm_list += "查询过程中Unibot数据API异常，可能部分报名信息仅返回UID号"
             height += 24 # 每行高度为20, 留白4
         print(bm_list)
 
