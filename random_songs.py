@@ -2,6 +2,7 @@ import json
 import requests
 import os
 import random
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 load_path = os.path.dirname(__file__)     #更改为自动获取
 
 def save_request(filename,byte):
@@ -79,6 +80,8 @@ def math_game(max_level,min_level):
                 math_musics.append([music_id,music_title,music_difficulty,music_level,music_assetbundleName])
 
 math_game(34,32)
+# for song in math_musics:
+#     print(song[2] + ' ' + str(song[3]) + ' | ' + song[1])
 
 def random_songs(num:int):
     '''
@@ -88,5 +91,57 @@ def random_songs(num:int):
     result = random.sample(math_musics,num)
     return result
 
-random_songs(7)
-random_songs(1)
+# print(random_songs(7))
+# random_songs(1)
+
+def ban_and_pick_img():
+    image = Image.open(load_path+'\\PJSK_7songs.png')
+    draw = ImageDraw.Draw(image)
+    font_count = ImageFont.truetype(load_path + f"\\zzaw.ttf", 20)
+    songs = random_songs(7)
+    x_pos = 370
+    y_pos = 140
+    i = 0
+    for song in songs:
+        if i == 3:
+            x_pos = 150
+            y_pos = 620
+        title = song[1]
+        difficulty = song[2]
+        level = song[3]
+        jacket = song[4]
+        jacket_img = Image.open(load_path+f'\\jackets\\{jacket}.png').resize((300,300))
+        image.paste(jacket_img,(x_pos,y_pos),jacket_img)
+        print(f'曲目{i+1}: [{difficulty} {level}]{title}')
+
+        for single_charter in title:
+            if not(single_charter.isascii() or single_charter == "："):
+                if len(title) > 10:
+                    title = title[:10]+'...'
+            else:
+                if len(title) > 16:
+                    title = title[:16]+'...'
+        draw.text((x_pos, y_pos+310), f'[{difficulty} {level}]{title}', 'white', font_count)
+        x_pos += 440
+        i+=1
+    image.show()
+
+member_list = ["PH","甘城","颂歌","冬霜颖落","幸运币","想你了冰红茶","劍靈幻辰","兮沫"]
+
+select_mode = input("请输入选择程序(0:随机抽一首歌/1:随机分组/2:抽取比赛曲目池7首歌)")
+if select_mode == "0":
+    print(random_songs(1))
+elif select_mode == "1":
+    random.shuffle(member_list)
+    i = 1
+    g = []
+    print("本次抽签的分组如下:")
+    for member in member_list:
+        if i % 2 == 0:
+            g.append([member_list[i-2],member])
+        i+=1
+    print(g)
+elif select_mode == "2":
+    ban_and_pick_img()
+else:
+    print("输入有误，请重试")
