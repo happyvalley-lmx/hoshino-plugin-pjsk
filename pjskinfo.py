@@ -7,6 +7,7 @@ import traceback
 from io import BytesIO
 import pymysql
 import datetime
+import random
 
 from hoshino.typing import CQEvent, MessageSegment
 from hoshino import Service, priv, config, get_self_ids, get_bot
@@ -53,6 +54,52 @@ url_getmc = 'https://musics.pjsekai.moe/musics.json'
 url_e_data = 'https://database.pjsekai.moe/events.json'
 color={"ap":"#d89aef","fc":"#ef8cee","clr":"#f0d873","all":"#6be1d9"}
 load_path = os.path.dirname(__file__)     #更改为自动获取
+
+def save_request(filename,byte):
+    '''
+    保存request的二进制数据到文件
+    :param filename: 需要保存的文件名路径
+    :param byte: 需要保存的二进制数据
+    '''
+    with open(load_path+f'\\{filename}','wb') as f:
+        f.write(byte)
+
+music_difficulties = ''
+musics = ''
+def update_musicdb():
+    '''更新乐曲数据库'''
+    global music_difficulties,musics
+    try:
+        music_difficulties_raw = req.get("https://sekai-world.github.io/sekai-master-db-diff/musicDifficulties.json").content
+        musics_raw = req.get("https://sekai-world.github.io/sekai-master-db-diff/musics.json").content
+        save_request('musicDifficulties.json',music_difficulties_raw)
+        save_request('musics.json',musics_raw)
+    except:
+        music_difficulties_raw = open(load_path + '\\musicDifficulties.json', encoding='UTF-8').read()
+        musics_raw = open(load_path + '\\musics.json', encoding='UTF-8').read()
+    music_difficulties = json.loads(music_difficulties_raw)
+    musics = json.loads(musics_raw)
+#初始化时尝试更新一次musicdb
+update_musicdb()
+
+@sv.on_fullmatch(('/pjsk refresh cache'))
+async def refresh_cache(bot, ev):
+    try:
+        update_musicdb()
+        await bot.send(ev, '刷新歌曲缓存成功')
+    except Exception as e:
+        await bot.send(ev, '刷新歌曲缓存失败')
+        print(e)
+
+def id_search_song(music_id):
+    '''
+    乐曲id找歌，从musics.json返回对应单曲的详情数据
+    :params music_id: 乐曲id
+    :return: 单曲详情数据
+    '''
+    for music in musics:
+        if music['id'] == music_id:
+            return music
 
 async def get_usericon(user):
     """通过Q号获取QQ头像。"""
@@ -523,3 +570,93 @@ async def matching_top(bot, ev:CQEvent):
     image.save(buf, format='PNG')
     base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}' #通过BytesIO发送图片，无需生成本地文件
     await bot.send(ev,f'[CQ:image,file={base64_str}]',at_sender = True)
+
+def download_jackets(music_assetbundleName):
+    '''
+    从在线数据库下载乐曲封面至"/jackets"文件夹内
+    :param music_assetbundleName: 封面文件名信息(由musics.json单曲信息储存)
+    '''
+    links = f'https://storage.sekai.best/sekai-assets/music/jacket/{music_assetbundleName}_rip/{music_assetbundleName}.png'
+    try:
+        jacket = req.get(links).content
+        jacket_path = load_path + f"\\jackets\\{music_assetbundleName}.png"
+        with open(jacket_path, 'wb') as f:
+            f.write(jacket)
+        print(f"成功下载 {music_assetbundleName}")
+    except Exception as e:
+        print(f"获取 {music_assetbundleName} 出错: {e}")
+
+def math_game(max_level,min_level):
+    '''
+    获取比赛曲目池
+    :param max_level: 最高难度等级
+    :param min_level: 最低难度等级
+    '''
+    math_musics = []
+    for charts in music_difficulties:
+        if charts['musicDifficulty'] == 'master' or charts['musicDifficulty'] == 'expert':
+            if charts['playLevel'] <= max_level and charts['playLevel'] >= min_level:
+                music_id = charts['musicId']
+                music = id_search_song(music_id)
+                music_title = music['title']
+                music_assetbundleName = music['assetbundleName']
+                #检查文件music_assetbundleName是否存在,若不存在则下载
+                if not os.path.exists(f"{load_path}\\jackets\\{music_assetbundleName}.png"):
+                    download_jackets(music_assetbundleName)
+                music_difficulty = charts['musicDifficulty']
+                music_level = charts['playLevel']
+                math_musics.append([music_id,music_title,music_difficulty,music_level,music_assetbundleName])
+    return math_musics
+
+@sv.on_prefix(['/pjsk 比赛抽歌'])
+async def games_7songs(bot, ev:CQEvent):
+    # 解析命令
+    command_parts = ev.message.extract_plain_text().split()
+    if not(len(command_parts) == 2):
+        await bot.send(ev, '命令格式错误，请输入两个纯数字的难度值，以空格分开')
+        return
+    try:
+        max_level = int(command_parts[0])
+        min_level = int(command_parts[1])
+        if max_level < min_level: #交换难度
+            max_level,min_level = min_level,max_level
+        math_musics = math_game(max_level,min_level)
+
+        image = Image.open(load_path+'\\PJSK_7songs.png')
+        draw = ImageDraw.Draw(image)
+        font_count = ImageFont.truetype(load_path + f"\\zzaw.ttf", 20)
+        songs = random.sample(math_musics,7)
+        x_pos = 370
+        y_pos = 140
+        i = 0
+        for song in songs:
+            if i == 3:
+                x_pos = 150
+                y_pos = 620
+            title = song[1]
+            difficulty = song[2]
+            level = song[3]
+            jacket = song[4]
+            jacket_img = Image.open(load_path+f'\\jackets\\{jacket}.png').resize((300,300))
+            image.paste(jacket_img,(x_pos,y_pos),jacket_img)
+            print(f'曲目{i+1}: [{difficulty} {level}]{title}')
+
+            for single_charter in title:
+                if not(single_charter.isascii() or single_charter == "："):
+                    if len(title) > 10:
+                        title = title[:10]+'...'
+                else:
+                    if len(title) > 16:
+                        title = title[:16]+'...'
+            draw.text((x_pos, y_pos+310), f'[{difficulty} {level}]{title}', 'white', font_count)
+            x_pos += 440
+            i+=1
+        draw.text((720, 1030), f'Generate by AkiyamaAkari Bot | 由 乐谷happyvalley 维护', 'black', font_count)
+        # 发送
+        buf = BytesIO()
+        image.save(buf, format='PNG')
+        base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}' #通过BytesIO发送图片，无需生成本地文件
+        await bot.send(ev,f'[CQ:image,file={base64_str}]',at_sender = True)
+    except Exception as e:
+        await bot.send(ev,f'抽歌过程中出现错误...')
+        print(e)
