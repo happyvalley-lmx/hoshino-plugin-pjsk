@@ -15,6 +15,10 @@ from hoshino import Service, priv, config, get_self_ids, get_bot
 from .config import bot_db
 import asyncio
 
+help_str = """广西吗了科技 世界计划助手
+# TODO: 帮助文档
+""".strip()
+
 sv = Service(
     name = 'pjsk信息查询',  #功能名
     use_priv = priv.NORMAL, #使用权限   
@@ -22,7 +26,7 @@ sv = Service(
     visible = False, #False隐藏
     enable_on_default = True, #是否默认启用
     bundle = '娱乐', #属于哪一类
-    )
+    help_= help_str.strip())
     
 def circle_corner(img, radii):  #把原图片变成圆角，这个函数是从网上找的，原址 https://www.pyget.cn/p/185266
     """
@@ -612,7 +616,7 @@ def math_game(max_level,min_level):
 async def games_7songs(bot, ev:CQEvent):
     # 解析命令
     command_parts = ev.message.extract_plain_text().split()
-    if not(len(command_parts) == 2):
+    if not(len(command_parts) == 2): # TODO: /pjsk 比赛抽歌 min max 难度类型(可选)
         await bot.send(ev, '命令格式错误，请输入两个纯数字的难度值，以空格分开')
         return
     try:
