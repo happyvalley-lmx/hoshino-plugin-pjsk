@@ -60,26 +60,42 @@ def download_jackets(music_assetbundleName):
         print(f"获取 {music_assetbundleName} 出错")
 
 math_musics = []
-def math_game(max_level,min_level):
+def math_game(max_level,min_level,level_name="default"):
     '''
-    比赛曲目池更新
+    获取比赛曲目池
     :param max_level: 最高难度等级
     :param min_level: 最低难度等级
     '''
-    global math_musics
+    math_musics = []
+    select_song = False
     for charts in music_difficulties:
-        if charts['musicDifficulty'] == 'master' or charts['musicDifficulty'] == 'expert':
+        if level_name == "default":
+            if charts['musicDifficulty'] == 'master' or charts['musicDifficulty'] == 'expert':
+                select_song = True
+        elif level_name == "append" or level_name == "apd":
+            if charts['musicDifficulty'] == 'append':
+                select_song = True
+        elif level_name == "master" or level_name == "mas":
+            if charts['musicDifficulty'] == 'master':
+                select_song = True
+        else:
+            return False
+        if select_song:
             if charts['playLevel'] <= max_level and charts['playLevel'] >= min_level:
                 music_id = charts['musicId']
                 music = id_search_song(music_id)
                 music_title = music['title']
                 music_assetbundleName = music['assetbundleName']
-                # download_jackets(music_assetbundleName)
+                #检查文件music_assetbundleName是否存在,若不存在则下载
+                if not os.path.exists(f"{load_path}\\jackets\\{music_assetbundleName}.png"):
+                    download_jackets(music_assetbundleName)
                 music_difficulty = charts['musicDifficulty']
                 music_level = charts['playLevel']
                 math_musics.append([music_id,music_title,music_difficulty,music_level,music_assetbundleName])
+        select_song = False
+    return math_musics
 
-math_game(34,32)
+math_musics = math_game(32,28,"apd")
 # for song in math_musics:
 #     print(song[2] + ' ' + str(song[3]) + ' | ' + song[1])
 
