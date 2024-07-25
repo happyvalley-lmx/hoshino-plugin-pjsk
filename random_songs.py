@@ -49,7 +49,7 @@ def download_jackets(music_assetbundleName):
     从在线数据库下载乐曲封面至"/jackets"文件夹内
     :param music_assetbundleName: 封面文件名信息(由musics.json单曲信息储存)
     '''
-    links = f'https://storage.sekai.best/sekai-assets/music/jacket/{music_assetbundleName}_rip/{music_assetbundleName}.png'
+    links = f'https://storage.sekai.best/sekai-jp-assets/music/jacket/{music_assetbundleName}_rip/{music_assetbundleName}.png'
     try:
         jacket = requests.get(links).content
         jacket_path = load_path + f"\\jackets\\{music_assetbundleName}.png"
