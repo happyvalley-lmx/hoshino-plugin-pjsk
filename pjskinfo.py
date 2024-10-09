@@ -631,7 +631,7 @@ def math_game(max_level,min_level,level_name="default"):
 async def games_7songs(bot, ev:CQEvent):
     # 解析命令
     command_parts = ev.message.extract_plain_text().split()
-    if not(len(command_parts) == 2 or len(command_parts) == 3): # TODO: /pjsk 比赛抽歌 min max 难度类型(可选)
+    if not(len(command_parts) == 2 or len(command_parts) == 3):
         await bot.send(ev, '命令格式错误，请输入两个纯数字的难度值，以空格分开')
         return
     try:
