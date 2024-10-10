@@ -107,6 +107,18 @@ def id_search_song(music_id):
         if music['id'] == music_id:
             return music
 
+def id_search_diff(music_id):
+    '''
+    乐曲id找难度，从musicDifficulties.json返回对应单曲的难度数据
+    :params music_id: 乐曲id
+    :return: 单曲谱面数据字典list
+    '''
+    charts_list = []
+    for charts in music_difficulties:
+        if charts['musicId'] == music_id:
+            charts_list.append(charts)
+    return charts_list
+
 async def get_usericon(user):
     """通过Q号获取QQ头像。"""
     p_icon = req.get(f'https://q1.qlogo.cn/g?b=qq&nk={user}&s=640')
@@ -685,3 +697,51 @@ async def games_7songs(bot, ev:CQEvent):
     except Exception as e:
         await bot.send(ev,f'抽歌过程中出现错误...')
         print(e)
+
+@sv.on_prefix('/pjsk song')
+async def pjsk_song(bot,ev):
+    try:
+        update_musicdb()
+    except:
+        print('更新歌曲数据库失败')
+    command_parts = ev.message.extract_plain_text().split()
+    if len(command_parts) != 1:
+        await bot.send(ev, '命令格式错误，请输入正确的曲名或歌曲id')
+        return
+    # 判断字符串是否为纯数字
+    if command_parts[0].isdigit() == False:
+        # TODO: 搜索歌曲后返回信息
+        music_id = 0
+        await bot.send(ev, '目前仅支持使用id查询歌曲信息，请等待后续开发')
+        return
+        # music = name_search_song(command_parts[0])
+    else:
+        music_id = int(command_parts[0])
+    music = id_search_song(music_id)
+    music_title = music['title'] #歌曲名
+    music_assetbundleName = music['assetbundleName']
+    music_composer = music['composer'] #作曲家
+    music_lyricist = music['lyricist'] #作词家
+    music_arranger = music['arranger'] #编曲家
+    music_publishedAt = music['publishedAt'] #游戏内发布日期
+    #检查文件music_assetbundleName是否存在,若不存在则下载
+    if not os.path.exists(f"{load_path}\\jackets\\{music_assetbundleName}.png"):
+        download_jackets(music_assetbundleName)
+    charts = id_search_diff(music_id)
+    chart_str = ""
+    for chart in charts:
+        playLevel = chart['playLevel']
+        musicDifficulty = chart['musicDifficulty']
+        totalNoteCount = chart['totalNoteCount']
+        chart_str += f'[{musicDifficulty} {playLevel}]音符数{totalNoteCount}\n'
+    music_str = f'歌曲名:{music_title}\n作曲:{music_composer}\n作词:{music_lyricist}\n编曲:{music_arranger}\n游戏内发布日期:{datetime.datetime.fromtimestamp(music_publishedAt/1000).strftime("%Y-%m-%d %H:%M:%S")}\n{chart_str}'
+    
+    try:
+        data = open(f"{load_path}\\jackets\\{music_assetbundleName}.png", "rb")
+        base64_str = base64.b64encode(data.read())
+        jacket =  b'base64://' + base64_str
+        jacket = str(jacket, encoding = "utf-8")
+        music_str = f"[CQ:image,file={jacket}]"+music_str
+        await bot.send(ev, music_str)
+    except:
+        await bot.send(ev, music_str)
