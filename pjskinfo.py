@@ -711,10 +711,17 @@ async def pjsk_song(bot,ev):
     # 判断字符串是否为纯数字
     if command_parts[0].isdigit() == False:
         # TODO: 搜索歌曲后返回信息
-        music_id = 0
-        await bot.send(ev, '目前仅支持使用id查询歌曲信息，请等待后续开发')
-        return
-        # music = name_search_song(command_parts[0])
+        music_name = command_parts[0]
+        get_song_id_link = f"https://api.unipjsk.com/getsongid/{music_name}"
+        response = req.get(get_song_id_link)
+        if response.status_code != 200:
+            await bot.send(ev, '查询歌曲信息失败，接口异常。')
+            return
+        response_json = response.json()
+        if response_json['status'] == 'false':
+            await bot.send(ev, '查询歌曲信息失败，歌曲/别名未找到。')
+            return
+        music_id = response_json['musicId']
     else:
         music_id = int(command_parts[0])
     music = id_search_song(music_id)
