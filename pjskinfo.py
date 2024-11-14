@@ -29,6 +29,34 @@ sv = Service(
     enable_on_default = True, #是否默认启用
     bundle = '娱乐', #属于哪一类
     help_= help_str.strip())
+
+def circle_corner(img, radii):  #把原图片变成圆角，这个函数是从网上找的，原址 https://www.pyget.cn/p/185266
+    """
+    圆角处理
+    :param img: 源图象。
+    :param radii: 半径，如：30。
+    :return: 返回一个圆角处理后的图象。
+    """
+    # 画圆（用于分离4个角）
+    circle = Image.new('L', (radii * 2, radii * 2), 0)  # 创建一个黑色背景的画布
+    draw = ImageDraw.Draw(circle)
+    draw.ellipse((0, 0, radii * 2, radii * 2), fill=255)  # 画白色圆形
+    # 原图
+    img = img.convert("RGBA")
+    w, h = img.size
+    # 画4个角（将整圆分离为4个部分）
+    alpha = Image.new('L', img.size, 255)
+    alpha.paste(circle.crop((0, 0, radii, radii)), (0, 0))  # 左上角
+    alpha.paste(circle.crop((radii, 0, radii * 2, radii)), (w - radii, 0))  # 右上角
+    alpha.paste(circle.crop((radii, radii, radii * 2, radii * 2)), (w - radii, h - radii))  # 右下角
+    alpha.paste(circle.crop((0, radii, radii, radii * 2)), (0, h - radii))  # 左下角
+    # alpha.show()
+    img.putalpha(alpha)  # 白色区域透明可见，黑色区域不可见
+    return img
+
+@sv.on_fullmatch('/pjsk help')
+async def pjsk_help(bot, ev):
+    await bot.send(ev, help_str)
     
 def circle_corner(img, radii):  #把原图片变成圆角，这个函数是从网上找的，原址 https://www.pyget.cn/p/185266
     """
@@ -279,6 +307,7 @@ async def countClear(_list,difficulty,data1):
 async def pj_profileGet(bot,ev:CQEvent):
     #逮捕
     uid = ev.user_id
+    msgid = ev.message_id
     userID = await lg(uid)
 
     selection = 0
@@ -303,6 +332,7 @@ async def pj_profileGet(bot,ev:CQEvent):
     if userID == 0:
         await bot.send(ev,f"没有绑定捏\n输入“/pjsk绑定+pjskID”来绑定吧~")
     else:
+        await bot.set_msg_emoji_like(message_id = msgid, emoji_id ='124')
         try:
             url = f'https://api.unipjsk.com/api/user/{userID}/profile'
             getdata = req.get(url)
@@ -310,7 +340,7 @@ async def pj_profileGet(bot,ev:CQEvent):
 
 
             dict_backup=[]
-            difficulty = ['easy','normal','hard','expert','master'] #TODO: APD难度
+            difficulty = ['easy','normal','hard','expert','master','append'] #TODO: APD难度
             for tag in difficulty:
                 clr_count = 0
                 fc_count = 0
@@ -332,99 +362,126 @@ async def pj_profileGet(bot,ev:CQEvent):
                 dict_backup.append({tag:{'fc':fc_count,'ap':ap_count,'clear':clr_count}})
             #print(dict_backup)
             
-            profile_image= Image.open(load_path+'\\test1.png')
-            new_pimage = load_path+'\\pjprofile.png'
+            # profile_image= Image.open(load_path+'\\test1.png')
+            new_pimage = load_path+'\\pjsk_profile_new.png'
+            profile_image = Image.open(new_pimage)
 
             if selection == 0:
                 picon = Image.open(BytesIO((await get_usericon(f'{uid}')).content)) #####
             else:
                 picon = Image.open(BytesIO((await getLeaderIcon(data1)).content))
             
-            num_font = ImageFont.truetype(load_path+'\\CAT.TTF',size=40)
-            name_font = ImageFont.truetype(load_path+'\\zzaw.ttf',size=80)
-            rank_font = ImageFont.truetype(load_path+'\\CAT.TTF',size=36)
-            word_font = ImageFont.truetype(load_path+'\\zzaw.ttf',size=32)
+            num_font = ImageFont.truetype(load_path+'\\qiantu_houheiti.ttf',size=50) # 完成数字字体
+            name_font = ImageFont.truetype(load_path+'\\MotoyaLMaru.ttf',size=47) # 名称字体
+            rank_font = ImageFont.truetype(load_path+'\\FOT-NewRodin-Pro.otf',size=70) # rank字体
+            word_font = ImageFont.truetype(load_path+'\\MotoyaLMaru.ttf',size=32)
             draw = ImageDraw.Draw(profile_image)
             draw_icon = ImageDraw.Draw(picon)
             
-            #防止部分玩家ID过大导致其以期望外的方式生成
             u = data1['user']['name'].encode("utf-8")
-            if len(u) < 18:
-                draw.text((281,130),data1['user']['name'],'#FFFFFF',font=name_font)
-            else:
-                name_font = ImageFont.truetype(load_path+'\\zzaw.ttf',size=48)
-                draw.text((281,162),data1['user']['name'],'#FFFFFF',font=name_font)
+            draw.text((290,605),data1['user']['name'],'#7C7E8F',font=name_font) # 绘制名字
 
-            draw.text((404,231),str(data1['user']['rank']),'#FFFFFF',font=rank_font)
+            draw.text((658,348),str(data1['user']['rank']),'#FFFFFF',font=rank_font) # 绘制rank
+            x_font = ImageFont.truetype(load_path+'\\MotoyaLMaru.ttf',size=40) # twitterID字体
+            draw.text((379,745),str(data1['userProfile']['twitterId']),'#7C7E8F',font=x_font) # 绘制twitterID
 
 
 
             
             async def measure(msg, font_size, img_width):
+                '''
+                :params msg: 字符串
+                :params font_size: 字体大小
+                :params img_width: 图片宽度
+                :return: 返回一个列表，列表中包含字符串中需要换行的字符的位置
+                '''
+                # 初始化变量i为0，l为msg的长度，length为0，positions为空列表
                 i = 0
                 l = len(msg)
                 length = 0
                 positions = []
+                # 循环遍历msg
                 while i < l :
+                    # 如果msg[i]是数字或字母，则length加上font_size的一半
                     if re.search(r'[0-9a-zA-Z]', msg[i]):
                         length += font_size // 2
+                    # 否则length加上font_size
                     else:
                         length += font_size
+                    # 如果length大于等于img_width，则将i添加到positions中，length置为0，i减1
                     if length >= img_width:
                         positions.append(i)
                         length = 0
                         i -= 1
+                    # i加1
                     i += 1
+                # 返回positions
                 return positions
 
             #个人简介
             
-            word_text = Image.new('RGB', (654, 157), "#5b5b5b")
-            
+            word_text = Image.new(mode='RGBA', size=(710, 248)) # 个人简介背景(透明)
             draw1 = ImageDraw.Draw(word_text)
             
 
-            msg = data1['userProfile']['word']
-            positions = await measure(msg,32,700)
+            msg = data1['userProfile']['word'] # 获取个人简介
+            positions = await measure(msg,32,660)
             str_list = list(msg)
             for pos in positions:
                 str_list.insert(pos,'\n')
             msg = "".join(str_list)  
 
-            draw1.text((0,0), msg, "#FFFFFF", font=word_font)
-            profile_image.paste(word_text, (103,307))
+            draw1.text((0,0), msg, "#7c7e8f", font=word_font)
+            profile_image.paste(word_text, (1068,592), word_text)
             
 
             def draw_musicsCompleted():
                 x = 0
                 for tag in difficulty:
-                    for pdata in dict_backup[x]:
-                        y = 0
-                        for ptag in ['clear','fc','ap']:
-                            draw.text((140 + x * 128,580 + y * 128),str(dict_backup[x][pdata][ptag]),'#FFFFFF',font=num_font)
-                            y = y + 1
+                    for pdata in dict_backup[x]: # 遍历 依次取出easy normal hard exp mas apd
+                        if tag != 'append' and x != 5:
+                            y = 0
+                            for ptag in ['clear','fc','ap']:
+                                dif_num = str(dict_backup[x][pdata][ptag])
+                                dif_num_x1,dif_num_y1,dif_num_x2,dif_num_y2 = num_font.getbbox(dif_num)
+                                draw.text((258 - (dif_num_x2-dif_num_x1)/2 + x * 143, 1222 + y * 230),dif_num,'#7c7e8f',font=num_font)
+                                y = y + 1
+                        else: # 让我们单独处理apd！
+                            y = 0
+                            for ptag in ['clear','fc','ap']:
+                                dif_num = str(dict_backup[x][pdata][ptag])
+                                dif_num_x1,dif_num_y1,dif_num_x2,dif_num_y2 = num_font.getbbox(dif_num)
+                                draw.text((1003 - (dif_num_x2-dif_num_x1)/2, 1222 + y * 230),dif_num,'#7c7e8f',font=num_font)
+                                y = y + 1
                     x = x + 1
-            
+            character_rank_font = ImageFont.truetype(load_path+'\\MotoyaLMaru.ttf',size=25)
             def characterdataGet():
+                # 遍历data1字典中的'userCharacters'键对应的列表
                 for i in data1['userCharacters']:
-                    if i["characterId"] % 4 == 0:
-                        x = 960 + (165 * 3)
-                        y = 350 + (107 * (((i["characterId"])// 4)-1))
-                        if i["characterId"] > 20:
-                            y = 130 + (107 * ((((i["characterId"])-20)// 4)-1))
+                    # 如果'characterId'能被4整除
+                    if i["characterId"] % 4 == 0 and i["characterId"] <= 20:
+                        # 固定生成在对应x位置，计算y坐标
+                        x = 1319 + (141 * 3)
+                        y = 1332 + (95 * (((i["characterId"])// 4)-1))
+                    elif i["characterId"] % 4 != 0 and i["characterId"] <= 20:
+                        # 计算x坐标
+                        x = 1319 + (141 * ((((i["characterId"])) % 4)-1))
+                        # 计算y坐标
+                        y = 1332 + (95 * (((i["characterId"])//4)))
                     else:
-                        x = 960 + (165 * ((((i["characterId"])) % 4)-1))
-                        y = 350 + (107 * (((i["characterId"])//4)))
-                        if i["characterId"] > 20:
-                            y = 130 + (107 * ((((i["characterId"])-20)// 4)))
-                    draw.text((x, y),str(i['characterRank']),"#000000",font=num_font)
+                        # 让我们绘制v家
+                        x = 1233 + (((i["characterId"])-21) * 116)
+                        y = 1241
+                    # 在指定位置绘制文本
+                    draw.text((x, y),str(i['characterRank']),"#FFFFFF",font=character_rank_font)
 
             
 
             draw_musicsCompleted()
             characterdataGet()
-            picon = picon.resize((177,177),Image.Resampling.LANCZOS)
-            profile_image.paste(picon, (95,106))
+            picon = picon.resize((250,250),Image.Resampling.LANCZOS)
+            picon = circle_corner(picon, 20)
+            profile_image.paste(picon, (253,185), picon)
             buf = BytesIO()
             profile_image.save(buf, format='PNG')
             base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}' #通过BytesIO发送图片，无需生成本地文件
