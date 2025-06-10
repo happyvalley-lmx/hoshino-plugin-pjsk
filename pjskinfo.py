@@ -169,7 +169,7 @@ def data_req(url):  #现场请求相关数据，耗时较长，但是数据永�
 #         return True
     
 async def pjsk_uid_check(pjsk_uid):
-    url = f'https://api.unipjsk.com/api/user/{pjsk_uid}/profile'
+    url = f'https://api.unipjsk.com/api/user/{{user_id}}/{pjsk_uid}/profile'
     try:
         getdata = req.get(url)
         data1 = json.loads(getdata.text)
@@ -332,9 +332,9 @@ async def pj_profileGet(bot,ev:CQEvent):
     if userID == 0:
         await bot.send(ev,f"没有绑定捏\n输入“/pjsk绑定+pjskID”来绑定吧~")
     else:
-        await bot.set_msg_emoji_like(message_id = msgid, emoji_id ='124')
+        await bot.set_group_reaction(group_id = ev.group_id, message_id = msgid, code ='124')
         try:
-            url = f'https://api.unipjsk.com/api/user/{userID}/profile'
+            url = f'https://api.unipjsk.com/api/user/{{user_id}}/{userID}/profile'
             getdata = req.get(url)
             data1 = json.loads(getdata.text)
 
