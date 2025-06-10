@@ -497,7 +497,7 @@ async def matching_list(bot,ev:CQEvent):
         await bot.send(ev,"目前仅管理员可查询参赛信息")
         return
     # bot = get_bot()
-    list_sql = "SELECT pjsk_uid, QQ from grxx WHERE pjsk_uid IS NOT NULL"
+    list_sql = "SELECT pjsk_uid, QQ from grxx WHERE pjsk_event IS NOT NULL"
     db_bot = pymysql.connect(
         host=bot_db.host,
         port=bot_db.port,
@@ -917,3 +917,38 @@ async def pjsk_event(bot,ev:CQEvent):
         await bot.send(ev,f'[CQ:image,file={base64_str}]')
     except Exception as e:
         await bot.send(ev,f'查询失败，请稍后再试\n错误信息：{e}')
+
+@sv.on_prefix(('参赛报名'))
+async def pjsk_bind(bot, ev: CQEvent):
+    db_bot = pymysql.connect(
+        host=bot_db.host,
+        port=bot_db.port,
+        user=bot_db.user,
+        password=bot_db.password,
+        database=bot_db.database
+    )
+    apu_cursor = db_bot.cursor()
+    qqid = ev.user_id
+    apu_getuid_sql = "SELECT QQ,pjsk_uid,pjsk_event FROM grxx WHERE QQ = %s" % (qqid)
+    # 先执行一次查询，查询是否已经签到注册过
+    try:
+        apu_cursor.execute(apu_getuid_sql)
+        result_cx = apu_cursor.fetchall()
+        if not result_cx:
+            await bot.send(ev, "无法查询到您的数据，请先执行以下操作：\n1.发送“签到”两个字来注册bot功能\n2.发送“/pjsk bind [您的pjsk uid]”来绑定您的pjsk账号\n绑定成功后再执行该命令可以报名参赛。", at_sender = True)
+        elif result_cx[0][1] == None:
+            await bot.send(ev, "您尚未绑定pjsk账号，请先执行以下操作：\n1.发送“/pjsk bind [您的pjsk uid]”来绑定您的pjsk账号\n2.绑定成功后再次发送“参赛报名”。", at_sender = True)
+        elif result_cx[0][2] == 1:
+            await bot.send(ev, "您已成功报名过：\n南宁7.19世界计划ONLY\n音游比赛 线上赛\n无需重复报名。", at_sender = True)
+        else:
+            await bot.send(ev, f'正在为您报名参赛')
+            try:
+                apu_bm_sql = "UPDATE `grxx` SET `pjsk_event`=1 WHERE `QQ`='%s'" % (qqid)
+                apu_cursor.execute(apu_bm_sql)
+                db_bot.commit()
+                await bot.send(ev, f'【报名成功！】\n您已成功报名：\n南宁世界计划ONLY 2.0\n音游比赛 线上赛')
+            except Exception as e:
+                await bot.send(ev, f'报名过程中发生错误:{e}')
+    except Exception as e:
+        await bot.send(ev, f'报名过程中发生错误:{e}')
+    db_bot.close()
