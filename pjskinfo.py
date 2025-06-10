@@ -809,3 +809,111 @@ async def pjsk_song(bot,ev):
         await bot.send(ev, music_str)
     except:
         await bot.send(ev, music_str)
+
+@sv.on_fullmatch('活动预测')
+async def pjsk_event(bot,ev:CQEvent):
+    await bot.set_group_reaction(group_id = ev.group_id, message_id = ev.message_id, code ='124')
+    try:
+        json_data = req.get("https://sekai-data.3-3.dev/predict.json").json()
+            # 解析JSON数据
+        
+        event = json_data["event"]
+        data = json_data["data"]
+        rank = json_data["rank"]
+        
+        # 转换时间戳
+        def format_time(timestamp):
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp//1000))
+        
+        start_time = format_time(event["startAt"])
+        end_time = format_time(event["aggregateAt"])
+        update_time = format_time(rank["ts"])
+        
+        # 创建图像
+        img_width, img_height = 1000, 700
+        background_color = (240, 245, 249)
+        img = Image.new('RGB', (img_width, img_height), background_color)
+        draw = ImageDraw.Draw(img)
+        
+        # 加载字体
+        title_font = ImageFont.truetype(load_path+"\\simhei.ttf", 36)
+        header_font = ImageFont.truetype(load_path+"\\simhei.ttf", 26)
+        info_font = ImageFont.truetype(load_path+"\\simhei.ttf", 22)
+        data_font = ImageFont.truetype(load_path+"\\arial.ttf", 24)
+        small_font = ImageFont.truetype(load_path+"\\simhei.ttf", 18)
+        
+        # 绘制标题
+        title = f"当前活动: {event['name']}"
+        title_width = draw.textlength(title, font=title_font)
+        draw.text(((img_width - title_width) // 2, 30), title, fill=(25, 35, 45), font=title_font)
+        
+        # 绘制时间信息
+        time_info = f"活动时间: {start_time} 至 {end_time}"
+        update_info = f"数据更新时间: {update_time}"
+        
+        draw.text((50, 100), time_info, fill=(70, 85, 100), font=info_font)
+        draw.text((50, 130), update_info, fill=(70, 85, 100), font=info_font)
+        
+        # 绘制分隔线
+        draw.line([(50, 170), (img_width - 50, 170)], fill=(180, 190, 200), width=2)
+        
+        # 定义表格位置
+        table_top = 200
+        col_width = (img_width - 100) // 3
+        
+        # 表头
+        headers = ["排名", "当前分数", "预测分数"]
+        header_colors = [(53, 108, 176), (76, 145, 65), (175, 100, 88)]
+        
+        for i, header in enumerate(headers):
+            x_pos = 50 + i * col_width
+            draw.rectangle([(x_pos, table_top), (x_pos + col_width, table_top + 50)], fill=(220, 230, 240))
+            header_width = draw.textlength(header, font=header_font)
+            draw.text((x_pos + (col_width - header_width) // 2, table_top + 10), 
+                    header, fill=header_colors[i], font=header_font)
+        
+        # 表格数据
+        rankings = [50, 100, 500, 1000, 5000, 10000, 50000, 100000]
+        row_height = 50
+        
+        for idx, rank_pos in enumerate(rankings):
+            row_y = table_top + 50 + idx * row_height
+            bg_color = (250, 252, 255) if idx % 2 == 0 else (235, 241, 247)
+            
+            # 行背景
+            draw.rectangle([(50, row_y), (img_width - 50, row_y + row_height)], fill=bg_color)
+            
+            # 排名
+            rank_text = f"Top {rank_pos}"
+            rank_width = draw.textlength(rank_text, font=data_font)
+            draw.text((50 + (col_width - rank_width) // 2, row_y + 15), 
+                    rank_text, fill=(40, 50, 60), font=data_font)
+            
+            # 当前分数
+            current_score = rank.get(str(rank_pos), "N/A")
+            if current_score != "N/A":
+                current_score = f"{current_score:,}"
+            current_width = draw.textlength(current_score, font=data_font)
+            draw.text((50 + col_width + (col_width - current_width) // 2, row_y + 15), 
+                    current_score, fill=(50, 90, 50), font=data_font)
+            
+            # 预测分数
+            predicted_score = data.get(str(rank_pos), "N/A")
+            if predicted_score != "N/A":
+                predicted_score = f"{predicted_score:,}"
+            predicted_width = draw.textlength(predicted_score, font=data_font)
+            draw.text((50 + 2 * col_width + (col_width - predicted_width) // 2, row_y + 15), 
+                    predicted_score, fill=(150, 70, 60), font=data_font)
+        
+        # 底部说明
+        note = "数据来源: https://3-3.dev/pjsk-predict"
+        note_width = draw.textlength(note, font=small_font)
+        draw.text((img_width - note_width - 30, img_height - 40), note, fill=(120, 130, 140), font=small_font)
+        
+        # 发送图片
+        buf = BytesIO()
+        img.save(buf, format='PNG')
+        base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}' #通过BytesIO发送图片，无需生成本地文件
+        await bot.send(ev,f'[CQ:image,file={base64_str}]')
+    except Exception as e:
+        await bot.send(ev,f'查询失败，请稍后再试\n错误信息：{e}')
