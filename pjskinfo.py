@@ -12,7 +12,7 @@ import random
 from hoshino.typing import CQEvent, MessageSegment
 from hoshino import Service, priv, config, get_self_ids, get_bot
 
-from .config import bot_db
+from .config import bot_db, pjsk_predit_link
 import asyncio
 
 help_str = """广西吗了科技 世界计划助手
@@ -179,7 +179,7 @@ async def pjsk_uid_check(pjsk_uid):
         return False
 
 
-@sv.on_prefix(('/pjsk绑定'))
+@sv.on_prefix(('/pjsk绑定','/pjsk bind'))
 async def pjsk_bind(bot, ev: CQEvent):
     #绑定PJSK ID到QQ上（使用本地数据库）
     input_id_raw = ev.message.extract_plain_text().strip()
@@ -497,7 +497,7 @@ async def matching_list(bot,ev:CQEvent):
         await bot.send(ev,"目前仅管理员可查询参赛信息")
         return
     # bot = get_bot()
-    list_sql = "SELECT pjsk_uid, QQ from grxx WHERE pjsk_event IS NOT NULL"
+    list_sql = "SELECT pjsk_uid, QQ, pjsk_score from grxx WHERE pjsk_event IS NOT NULL"
     db_bot = pymysql.connect(
         host=bot_db.host,
         port=bot_db.port,
@@ -527,13 +527,14 @@ async def matching_list(bot,ev:CQEvent):
             num += 1
             uid = single[0]
             qqid = single[1]
+            score = single[2]
             u_name = await pjsk_uid_check(uid)
             if u_name == False:
                 u_name = str(uid)
-                bm_list_add = f"{num}.UID:{u_name} - QQ:{qqid}\n"
+                bm_list_add = f"{num}.[{score}]UID:{u_name} - QQ:{qqid}\n"
                 api_error = True
             else:
-                bm_list_add = f"{num}.昵称:{u_name} - QQ:{qqid}\n"
+                bm_list_add = f"{num}.[{score}]昵称:{u_name} - QQ:{qqid}\n"
             left_n, top_n, right_n, bottom_n = font.getbbox(bm_list_add)
             if(right_n > right): # 更新最长的一行
                 right = right_n
@@ -814,7 +815,7 @@ async def pjsk_song(bot,ev):
 async def pjsk_event(bot,ev:CQEvent):
     await bot.set_group_reaction(group_id = ev.group_id, message_id = ev.message_id, code ='124')
     try:
-        json_data = req.get("https://sekai-data.3-3.dev/predict.json").json()
+        json_data = req.get(f"{pjsk_predit_link}").json()
             # 解析JSON数据
         
         event = json_data["event"]
