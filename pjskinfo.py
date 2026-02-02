@@ -8,14 +8,19 @@ from io import BytesIO
 import pymysql
 import datetime
 import random
+import hashlib
+from openai import OpenAI
 
 from hoshino.typing import CQEvent, MessageSegment
+from hoshino.util import DailyNumberLimiter
 from hoshino import Service, priv, config, get_self_ids, get_bot
 
-from .config import bot_db, pjsk_predit_link
+from .config import bot_db, pjsk_predit_link, API_KEY
 import asyncio
 
-help_str = """广西吗了科技 世界计划助手
+nowdir = os.getcwd()
+
+help_str = """广西 BEMALOW 世界计划助手
 [/pjsk绑定 <id>] 绑定世界计划(日服)账号至bot
 [/pjskpf] 查询个人信息，亦可直接使用 [个人信息]
 [/pjsk 比赛抽歌 <最低难度> <最高难度> <难度级别(可选)>] 从选定的范围进行比赛随机抽歌(7首)
@@ -89,6 +94,8 @@ url_e_data = 'https://database.pjsekai.moe/events.json'
 color={"ap":"#d89aef","fc":"#ef8cee","clr":"#f0d873","all":"#6be1d9"}
 load_path = os.path.dirname(__file__)     #更改为自动获取
 
+COVERS_DIR = load_path + f'/jackets'
+DEFAULT_COVER_COLOR = (50, 50, 60)
 def save_request(filename,byte):
     '''
     保存request的二进制数据到文件
@@ -146,6 +153,47 @@ def id_search_diff(music_id):
         if charts['musicId'] == music_id:
             charts_list.append(charts)
     return charts_list
+
+# 判断id是否为课题曲
+def check_topic_song(id):
+    '''
+    判断id是否为课题曲  
+    :params id: 乐曲id  
+    return: bool
+    '''
+    with open(load_path + f"\\today_topic.json", 'r', encoding='utf-8') as f:
+        today_topic = json.load(f)
+        for song in today_topic:
+            if song['id'] == id:
+                return True
+        else:
+            return False
+        
+def get_topic_id():
+    '''
+    获取今日课题曲  
+    return: 包含今日课题曲id的list
+    '''
+    today_topic_list = []
+    with open(load_path + f"\\today_topic.json", 'r', encoding='utf-8') as f:
+        today_topic = json.load(f)
+        for topic in today_topic:
+            today_topic_list.append(topic['id'])
+        return today_topic_list
+            
+# 判断Note数是否等于给出的乐曲id的总Note数
+def check_note_song(id, note):
+    '''
+    判断Note数是否等于给出的乐曲id的总Note数  
+    :params id: 乐曲id  
+    :params note: Note数  
+    return: bool
+    '''
+    difficulties = id_search_diff(id)
+    for song_diff in difficulties:
+        if note == song_diff['totalNoteCount']:
+            return True
+    return False
 
 async def get_usericon(user):
     """通过Q号获取QQ头像。"""
@@ -756,32 +804,7 @@ async def games_7songs(bot, ev:CQEvent):
         await bot.send(ev,f'抽歌过程中出现错误...')
         print(e)
 
-@sv.on_prefix('/pjsk song')
-async def pjsk_song(bot,ev):
-    try:
-        update_musicdb()
-    except:
-        print('更新歌曲数据库失败')
-    command_parts = ev.message.extract_plain_text().split()
-    if len(command_parts) != 1:
-        await bot.send(ev, '命令格式错误，请输入正确的曲名或歌曲id')
-        return
-    # 判断字符串是否为纯数字
-    if command_parts[0].isdigit() == False:
-        # TODO: 搜索歌曲后返回信息
-        music_name = command_parts[0]
-        get_song_id_link = f"https://api.unipjsk.com/getsongid/{music_name}"
-        response = req.get(get_song_id_link)
-        if response.status_code != 200:
-            await bot.send(ev, '查询歌曲信息失败，接口异常。')
-            return
-        response_json = response.json()
-        if response_json['status'] == 'false':
-            await bot.send(ev, '查询歌曲信息失败，歌曲/别名未找到。')
-            return
-        music_id = response_json['musicId']
-    else:
-        music_id = int(command_parts[0])
+def id_get_song_info(music_id):
     music = id_search_song(music_id)
     music_title = music['title'] #歌曲名
     music_assetbundleName = music['assetbundleName']
@@ -794,22 +817,51 @@ async def pjsk_song(bot,ev):
         download_jackets(music_assetbundleName)
     charts = id_search_diff(music_id)
     chart_str = ""
+    charts_list = []
     for chart in charts:
         playLevel = chart['playLevel']
         musicDifficulty = chart['musicDifficulty']
         totalNoteCount = chart['totalNoteCount']
         chart_str += f'[{musicDifficulty} {playLevel}]音符数{totalNoteCount}\n'
-    music_str = f'歌曲名:{music_title}\n作曲:{music_composer}\n作词:{music_lyricist}\n编曲:{music_arranger}\n游戏内发布日期:{datetime.datetime.fromtimestamp(music_publishedAt/1000).strftime("%Y-%m-%d %H:%M:%S")}\n{chart_str}'
-    
+        charts_list.append([musicDifficulty,playLevel,totalNoteCount])
+        release_date_format = datetime.datetime.fromtimestamp(music_publishedAt/1000).strftime("%Y-%m-%d %H:%M:%S")
+    music_str = f'歌曲名:{music_title}\n作曲:{music_composer}\n作词:{music_lyricist}\n编曲:{music_arranger}\n游戏内发布日期:{release_date_format}\n{chart_str}'
     try:
         data = open(f"{load_path}\\jackets\\{music_assetbundleName}.png", "rb")
         base64_str = base64.b64encode(data.read())
         jacket =  b'base64://' + base64_str
         jacket = str(jacket, encoding = "utf-8")
         music_str = f"[CQ:image,file={jacket}]"+music_str
-        await bot.send(ev, music_str)
+    except Exception as e:
+        print(f'获取乐曲封面失败:{e}')
+    return music_str,[music_id,music_title,music_composer,music_lyricist,music_arranger,release_date_format,charts_list,music_assetbundleName]
+@sv.on_prefix('/pjsk song')
+async def pjsk_song(bot,ev):
+    try:
+        update_musicdb()
     except:
-        await bot.send(ev, music_str)
+        print('更新歌曲数据库失败')
+    command_parts = ev.message.extract_plain_text().split()
+    if len(command_parts) != 1:
+        await bot.send(ev, '命令格式错误，请输入正确的曲名或歌曲id')
+        return
+    # 判断字符串是否为纯数字
+    if command_parts[0].isdigit() == False:
+        music_name = command_parts[0]
+        get_song_id_link = f"https://api.unipjsk.com/getsongid/{music_name}" # TODO : UniBot接口已经废弃，需要换到锡纸的接口
+        response = req.get(get_song_id_link)
+        if response.status_code != 200:
+            await bot.send(ev, '查询歌曲信息失败，接口异常。')
+            return
+        response_json = response.json()
+        if response_json['status'] == 'false':
+            await bot.send(ev, '查询歌曲信息失败，歌曲/别名未找到。')
+            return
+        music_id = response_json['musicId']
+    else:
+        music_id = int(command_parts[0])
+    music_str = id_get_song_info(music_id)[0]
+    await bot.send(ev, music_str)
 
 @sv.on_fullmatch('活动预测')
 async def pjsk_event(bot,ev:CQEvent):
@@ -953,3 +1005,636 @@ async def pjsk_bind(bot, ev: CQEvent):
     except Exception as e:
         await bot.send(ev, f'报名过程中发生错误:{e}')
     db_bot.close()
+
+@sv.on_prefix(('/md5','.md5'))
+async def md5_hash(bot, ev:CQEvent):
+    input_str = ev.message.extract_plain_text().strip()
+    input_bytes = input_str.encode('utf-8')
+    full_md5 = hashlib.md5(input_bytes).hexdigest()
+
+    await bot.send(ev, f'MD5 Hash: {full_md5}\n 16位：{full_md5[8:24]}')
+
+lmtd = DailyNumberLimiter(3) # 从Hoshino自带的utils中导入的次数限制器
+
+class PicListener: # 从 picfinder 抄的 PicListener 类
+    def __init__(self):
+        self.on = {}
+        self.count = {}
+        self.limit = {}
+        self.timeout = {}
+
+    def get_on_off_status(self, gid):
+        return self.on[gid] if self.on.get(gid) is not None else False
+
+    def turn_on(self, gid, uid):
+        self.on[gid] = uid
+        self.timeout[gid] = datetime.datetime.now()+datetime.timedelta(seconds=30)
+        self.count[gid] = 0
+        self.limit[gid] = 3-lmtd.get_num(uid) # 每日最多提交3次成绩？
+
+    def turn_off(self, gid):
+        self.on.pop(gid)
+        self.count.pop(gid)
+        self.timeout.pop(gid)
+        self.limit.pop(gid)
+
+    def count_plus(self, gid):
+        self.count[gid] += 1
+
+pls = PicListener()
+@sv.on_prefix(('/pjsk签到'))
+async def pjsk_sign(bot, ev: CQEvent):
+    user_id = ev.user_id
+    group_id = ev.group_id
+    message_id = ev.message_id
+    ret = None
+    # 检查消息中是否包含图片
+    for m in ev.message:
+        if m.type == 'image':
+            file = m.data['file']
+            url = m.data['url']
+            if 'subType' in m.data:
+                subType = m.data['subType']
+            else:
+                subType = None
+            ret = 1
+            break
+    # 如果消息中没有图片，启动定时签到流程
+    if not ret:
+        if pls.get_on_off_status(group_id):
+            if user_id == pls.on[group_id]:
+                pls.timeout[group_id] = datetime.now()+datetime.timedelta(seconds=30)
+                await bot.finish(ev, '您已经进入今日的签到任务流程啦！请直接发送成绩图来完成签到~')
+            else:
+                await bot.finish(ev, f'本群[CQ:at,qq={pls.on[group_id]}]正在提交今日的签到任务，请稍后再提交~')
+        pls.turn_on(group_id, user_id)
+        await bot.send(ev, f'请在30秒内发送今日的课题曲成绩图以完成签到~')
+        await asyncio.sleep(30)
+        ct = 0
+        # 循环检查签到状态和超时情况
+        while pls.get_on_off_status(group_id):
+            if datetime.datetime.now() < pls.timeout[group_id]:
+                if ct!= pls.count[group_id]:
+                    ct = pls.count[group_id]
+                    pls.timeout[group_id] = datetime.now()+datetime.timedelta(seconds=60)
+            else:
+                temp = pls.on[group_id]
+                if not pls.count[group_id]:
+                    await bot.send(ev, f'[CQ:at,qq={temp}]，您已超过30秒未提交今日的课题成绩图，签到失败，请您重新发送~')
+                else:
+                    await bot.send(ev, f'[CQ:at,qq={temp}]，您已超过30秒未提交新的成绩图，已为您退出签到模式~您本次一共提交了{pls.count[group_id]}张成绩图~')
+                pls.turn_off(ev.group_id)
+                break
+            await asyncio.sleep(30)
+        return
+    # 权限检查和每日提交次数限制
+    if not priv.check_priv(ev, priv.SUPERUSER): # 检查权限
+        if not lmtd.check(user_id):
+            await bot.send(ev, f'您今天已经提交了3张成绩图了，休息一下明天再来吧~', at_sender = True)
+            return
+    
+    if 'c2cpicdw.qpic.cn/offpic_new/' in url:
+        md5 = file[:6].upper()
+        url = f"http://gchat.qpic.cn/gchatpic_new/0/0-0-{md5}/0?term=2"
+    await bot.send(ev, f'正在处理您签到的成绩图...')
+    await picsigner(bot, ev, url)
+
+@sv.on_message('group')
+async def picmessage(bot, ev: CQEvent):
+    message_id = ev.message_id
+    atcheck = False
+    batchcheck = False
+    # 检查是否被@或处于批处理模式
+    for m in ev.message:
+        if m.type == 'at' and str(m.data['qq']) == str(ev.self_id):
+            atcheck = True
+            break
+    if pls.get_on_off_status(ev.group_id):
+        if int(pls.on[ev.group_id]) == int(ev.user_id):
+            batchcheck = True
+    if not(batchcheck or atcheck):
+        return
+    user_id = ev.user_id
+    ret = None
+    # 提取消息中的图片信息
+    for m in ev.message:
+        if m.type == 'image':
+            file = m.data['file']
+            url = m.data['url']
+            if 'subType' in m.data:
+                subType = m.data['subType']
+            else:
+                subType = None
+            ret = 1
+            break
+    if not ret:
+        print('no pic')
+        return
+    # 权限检查和每日限制检查
+    if not priv.check_priv(ev, priv.SUPERUSER): # 检查权限
+        if not lmtd.check(user_id):
+            await bot.send(ev, f'您今天已经提交了3张成绩图了，休息一下明天再来吧~', at_sender = True)
+            if pls.get_on_off_status(ev.group_id):
+                pls.turn_off(ev.group_id)
+                return
+    # 批量处理模式下的计数和限制检查
+    if pls.get_on_off_status(ev.group_id):
+        pls.count_plus(ev.group_id)
+        if pls.count[ev.group_id] >= pls.limit[ev.group_id]:
+            await bot.send(ev, f'您今天已经提交了3张成绩图了，休息一下明天再来吧~', at_sender = True)
+            pls.turn_off(ev.group_id)
+            return
+    # 检查是否为表情包（非正常图片）
+    if subType:
+        if subType != '0':
+            await bot.send(ev, f'请不要在签到时发送表情包哦~')
+            return
+    # 处理图片链接并调用图片签名处理函数
+    if 'c2cpicdw.qpic.cn/offpic_new/' in url:
+        md5 = file[:6].upper()
+        url = f"http://gchat.qpic.cn/gchatpic_new/0/0-0-{md5}/0?term=2"
+    await bot.send(ev, f'正在处理您签到的成绩图...')
+    await picsigner(bot, ev, url)
+
+async def picsigner(bot, ev: CQEvent, image_data):
+    user_id = ev.user_id
+    group_id = ev.group_id
+    img = req.get(image_data, timeout=10).content
+    def get_pjsk_score(score_pic):
+        '''
+        利用在线的VL图像识别模型识别并返回分数。
+        
+        :param score_pic: 成绩图
+        :return: 包含分数详情的JSON数据
+        '''
+        def encode_image(image_path): # 编码函数：将接收到的图片压缩并转换为 Base64 编码的字符串
+            # 如果传入的是二进制数据而不是文件路径，则使用BytesIO处理
+            if isinstance(image_path, bytes):
+                img = Image.open(BytesIO(image_path))
+            else:
+                img = Image.open(image_path)
+            img_width, img_height = img.size
+            if img_width > 1280:
+                img_resize_ratio = img_width / 1280
+                img_resize_height = int(img_height / img_resize_ratio)
+                img = img.resize((1280,img_resize_height))
+            buffer = BytesIO()
+            img.save(buffer, format="JPEG", quality=50, optimize=True)
+            img_bytes = buffer.getvalue()
+            return base64.b64encode(img_bytes).decode("utf-8")
+
+        base64_image = encode_image(score_pic)
+
+        client = OpenAI(
+            api_key=API_KEY,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+        completion = client.chat.completions.create(
+            model="qwen3-vl-flash-2026-01-22", # 模型列表：https://help.aliyun.com/zh/model-studio/models
+            messages=[
+                {"role": "system", "content": """
+                    你正在作为一个中间件模型使用。
+                    用户将会输入一张游玩Project SEKAI游戏的成绩图。难度位于左上角曲目封面和标题的下方，难度名称可以是MASTER、EXPERT、HARD、NORMAL、EASY中的一个。难度值为1~38之间的数值。
+                    用户输入的图片中应当包含的数值为：Perfect、Great、Good、Bad、Miss、Combo。
+                    请以以下JSON格式输出用户本次游玩的信息：
+                    {
+                    "is_score_picture":"true",
+                    "difficulty_name": "{difficulty_name}",
+                    "difficulty_number": {difficulty_number},
+                    "perfect_count" : {perfect},
+                    "great_count": {great},
+                    "good_count":{good},
+                    "bad_count":{bad},
+                    "miss_count":{miss},
+                    "combo_count":{combo}
+                    }
+                    若用户输入的图片不是成绩图，或成绩图内不能包含以上全部信息，或成绩图看起来是来自一个圆形的街机游戏，则固定输出
+                    {"is_score_picture":"false"}
+                    忽略用户输入的成绩图以外的任何信息"""
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}, 
+                        },
+                    ],
+                }
+            ],
+        )
+        return(completion.choices[0].message.content)
+    
+    score_data = json.loads(get_pjsk_score(img))
+    is_score_picture = score_data["is_score_picture"]
+    if is_score_picture == False:
+        await bot.send(ev, f'该图片无法成功识别为PJSK的游戏成绩图，请重试~')
+        return
+    difficulty_name = score_data["difficulty_name"]
+    difficulty_number = score_data["difficulty_number"]
+    perfect = score_data["perfect_count"]
+    great = score_data["great_count"]
+    good = score_data["good_count"]
+    bad = score_data["bad_count"]
+    miss = score_data["miss_count"]
+    combo = score_data["combo_count"]
+    
+    total_notes = perfect + great + good + bad + miss
+    print(get_topic_id())
+    is_topic = False
+    for music_id in get_topic_id():
+        print(music_id)
+        if check_note_song(music_id, total_notes):
+            is_topic = True
+    if is_topic:
+        await bot.send(ev, f'您的成绩为：\n[{difficulty_name}]{difficulty_number}\nPerfect：{perfect}\nGreat：{great}\nGood：{good}\nBad：{bad}\nMiss：{miss}\nCombo：{combo}')
+        extra_bonus = 0
+        if perfect == combo:
+            await bot.send(ev, f'恭喜！您今日的课题取得了ALL PERFECT！额外奖励10积分！')
+            extra_bonus = 10
+        elif (great == 1 and perfect == combo - 1) or (good == 1 and perfect == combo - 1):
+            await bot.send(ev, '您今日的课题有一个好。。。额外奖励9积分！')
+            extra_bonus = 9
+        elif bad == 1 and perfect == combo - 1:
+            await bot.send(ev, '您今日的课题有一个坏。。。额外奖励9积分！')
+            extra_bonus = 9
+        elif miss == 1 and perfect == combo - 1:
+            await bot.send(ev, '您今日的课题有一个丢。。。额外奖励9积分！')
+            extra_bonus = 9
+        await qiandao(bot, ev, extra_bonus)
+    else:
+        await bot.send(ev, '您游玩的不是今日的课题曲，请先游玩今日课题曲再来发送课题曲成绩图进行签到~')
+        print(f"perfect:{perfect}, great:{great}, good:{good}, bad:{bad}, miss:{miss}, combo:{combo}")
+
+async def qiandao(bot, ev: CQEvent, extra_bonus=0):
+    db_bot = pymysql.connect(
+        host=bot_db.host,
+        port=bot_db.port,
+        user=bot_db.user,
+        password=bot_db.password,
+        database=bot_db.database
+    )
+    apu_cursor = db_bot.cursor()
+    qqid = ev.user_id
+    groupid = ev.group_id
+    msgid = ev.message_id
+    try:
+        await bot.set_group_reaction(group_id = groupid, message_id = msgid, code ='124')
+    except:
+        await bot.set_msg_emoji_like(message_id = msgid, emoji_id ='124')
+    # 获取Q号/积分/上次签到时间/连续签到天数/上次抽奖时间/单天抽奖次数
+    apu_qd_sql = "SELECT QQ,jifei,scqdsj,lxqdts,sccjsj,dtcjcs FROM grxx WHERE QQ = %s" % (qqid)
+    try:
+        apu_cursor.execute(apu_qd_sql)
+        result_qd = apu_cursor.fetchall()
+        # 判断结果是否为空，若为空则插入新数据（新用户注册）
+        if not result_qd:
+            #插入新数据
+            add_mem_sql = "INSERT INTO `grxx` (`Qqun`, `QQ`, `jifei`, `scqdsj`, `lxqdts`) VALUES ('%s', '%s', '0', '0', '0')" %(groupid, qqid)
+            try:
+                apu_cursor.execute(add_mem_sql)
+                db_bot.commit()
+                apu_cursor.execute(apu_qd_sql)
+                result_qd = apu_cursor.fetchall()
+            except Exception as e:
+                await bot.send(ev, '错误:' + str(e))
+                db_bot.rollback
+        point = result_qd[0][1]
+        qd_date = result_qd[0][2]
+        qd_lianxu_date = result_qd[0][3]
+        cj_date = result_qd[0][4]
+        cj_times = result_qd[0][5]
+        today = datetime.date.today()
+        today_str = "%s年%s月%s日" % (today.year, today.month, today.day)
+        if today_str == qd_date:
+            try:
+                await bot.set_group_reaction(group_id = groupid, message_id = msgid, code ='123')
+            except:
+                await bot.set_msg_emoji_like(message_id = msgid, emoji_id ='123')
+        else:
+            try:
+                # UPDATE `grxx` SET `jifei`='5402', `lxqdts`='2' WHERE (`Qqun`='205194089') AND (`QQ`='1085636071')
+                get_point = random.randint(1,100) + extra_bonus # 随机获得签到积分+额外奖励积分
+                point = point + get_point
+                qd_lianxu_date += 1
+                update_sql = "UPDATE `grxx` SET `jifei`='%s' ,`lxqdts`='%s' ,`scqdsj`='%s' WHERE `QQ`='%s'" % (point, qd_lianxu_date, today_str, qqid)
+                apu_cursor.execute(update_sql)
+                db_bot.commit()
+
+                with Image.open(nowdir + f"\\hoshino\\modules\\sdvx_helper\\pics\\签到_new.png") as qd_bg:
+                    font_main = ImageFont.truetype(nowdir + f"\\hoshino\\modules\\sdvx_helper\\ark-pixel-12px-monospaced-zh_cn.otf", 20)
+                    font_point = ImageFont.truetype(nowdir + f"\\hoshino\\modules\\sdvx_helper\\ark-pixel-12px-monospaced-zh_cn.otf", 64)
+                    font_time = ImageFont.truetype(nowdir + f"\\hoshino\\modules\\sdvx_helper\\ark-pixel-12px-monospaced-zh_cn.otf", 10)
+                    draw = ImageDraw.Draw(qd_bg)
+                    point_txt = f'{point}'
+                    p_tl,tt,p_tr,tb = font_main.getbbox(point_txt)
+                    p_x = 365 - (p_tr - p_tl) / 2
+                    draw.text((p_x, 176), point_txt, 'black', font_main) # 绘制总积分
+                    get_point_txt = f'{get_point}'
+                    gp_tl,tt,gp_tr,tb = font_point.getbbox(get_point_txt)
+                    gp_x = 365 - (gp_tr - gp_tl) / 2
+                    draw.text((gp_x, 78), get_point_txt, '#A32828', font_point) # 绘制获得积分
+                    time_txt = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    t_tl,tt,t_tr,tb = font_time.getbbox(time_txt)
+                    t_x = 365 - (t_tr - t_tl) / 2
+                    draw.text((t_x, 201), time_txt, 'black', font_time) # 绘制日期
+                    try:
+                        qq_img = Image.open(BytesIO((await get_usericon(f'{qqid}')).content)).resize((180,180)).convert("RGBA")
+                    except:
+                        qq_img = Image.open(nowdir + f"\\hoshino\\modules\\sdvx_helper\\pics\\meitu.png").resize((180,180)).convert("RGBA")
+                    qd_bg.paste(qq_img,(79,31),qq_img)
+                    qd_bg.save(nowdir + f'\\hoshino\\modules\\sdvx_helper\\qd\\{qqid}.png') # 保存图片
+                    
+                data = open(nowdir + f'\\hoshino\\modules\\sdvx_helper\\qd\\{qqid}.png', "rb")
+                base64_str = base64.b64encode(data.read())
+                img_b64 =  b'base64://' + base64_str
+                img_b64 = str(img_b64, encoding = "utf-8")  
+                await bot.send(ev, f'[CQ:image,file={img_b64}]', at_sender = True)
+                # await bot.send(ev, "签到成功！获得 %s 积分\n您当前已签到 %s 天\n当前共有 %s 积分" %(get_point, qd_lianxu_date, point), at_sender=True)
+            except Exception as e:
+                await bot.send(ev, '错误:' + str(e))
+                db_bot.rollback()
+    except Exception as e:
+        print(e.args)
+        await bot.send(ev, '错误:' + str(e))
+    db_bot.close()
+
+# TODO: 每日刷新随机课题曲
+@sv.scheduled_job('interval', minutes=1440)
+async def daily_refresh_topic_song():
+    math_musics_hard = math_game(38,31)
+    math_musics_normal = math_game(31,26)
+    math_musics_easy = math_game(26,1)
+    song_hard = random.sample(math_musics_hard,1)
+    song_normal = random.sample(math_musics_normal,1)
+    song_ez = random.sample(math_musics_easy,1)
+
+def draw_music_cards_v3(id1: int, id2: int, id3: int):
+    """
+    绘制包含真实封面、页眉、页脚的音乐游戏课题曲图片。
+    数据结构: [id, title, comp, lyr, arr, date, charts, asset_name]
+    """
+    # 获取乐曲数据
+    raw_data_list = [id_get_song_info(id1)[1], id_get_song_info(id2)[1], id_get_song_info(id3)[1]]
+
+    # =========================================================================
+    # PART 2: 样式与画布配置
+    # =========================================================================
+
+    CANVAS_WIDTH = 1920
+    CANVAS_HEIGHT = 1080
+    BG_COLOR = (20, 20, 24)
+    
+    # 调整卡片尺寸以留出 Header/Footer 空间
+    CARD_WIDTH = 500
+    CARD_HEIGHT = 860  # 稍微改短一点
+    CARD_SPACING = 80  # 稍微紧凑一点
+    CARD_BG_COLOR = (40, 40, 45)
+    
+    # 字体加载辅助函数
+    def load_font(size, bold=False):
+        try:
+            font_name = "MotoyaLMaru.ttf" if bold else "zzaw.ttf"
+            return ImageFont.truetype(load_path + f'\\{font_name}', size)
+        except OSError:
+            return ImageFont.load_default()
+
+    # 字体定义
+    font_header = load_font(64, bold=True)
+    font_footer = load_font(24)
+    font_title = load_font(40, bold=True)
+    font_info = load_font(22)
+    font_diff_label = load_font(15, bold=True)
+    font_diff_val = load_font(26, bold=True)
+    font_note = load_font(16)
+
+    # 难度颜色
+    DIFF_COLORS = [
+        (76, 175, 80), (33, 150, 243), (255, 152, 0), (244, 67, 54), (156, 39, 176)
+    ]
+
+    # 创建画布
+    image = Image.new('RGB', (CANVAS_WIDTH, CANVAS_HEIGHT), BG_COLOR)
+    draw = ImageDraw.Draw(image)
+
+    # 绘制背景装饰 (简单几何)
+    draw.ellipse((-200, -200, 600, 600), fill=(30, 30, 35))
+    draw.ellipse((1400, 500, 2200, 1300), fill=(30, 30, 35))
+
+    # =========================================================================
+    # PART 3: 绘制 Header 和 Footer
+    # =========================================================================
+
+    # 1. Header (今日随机课题曲)
+    header_text = "今日随机課題曲"
+    
+    # 计算居中
+    bbox = draw.textbbox((0, 0), header_text, font=font_header)
+    header_w = bbox[2] - bbox[0]
+    draw.text(((CANVAS_WIDTH - header_w) / 2, 35), header_text, font=font_header, fill=(240, 240, 240))
+    # 标题下划线装饰
+    draw.line((CANVAS_WIDTH/2 - 100, 130, CANVAS_WIDTH/2 + 100, 130), fill=(100, 200, 255), width=4)
+
+    # 2. Footer (Credit + Time)
+    footer_y = CANVAS_HEIGHT - 50
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    credit_text = "Generate by AkiyamaAkari / Credit to happyvalley"
+    
+    # 左侧：Credit
+    draw.text((60, footer_y), credit_text, font=font_footer, fill=(150, 150, 150), anchor="lm")
+    
+    # 右侧：Time
+    draw.text((CANVAS_WIDTH - 60, footer_y), current_time, font=font_footer, fill=(150, 150, 150), anchor="rm")
+
+    # =========================================================================
+    # PART 4: 循环绘制卡片
+    # =========================================================================
+
+    # 计算整体居中
+    total_cards_width = (CARD_WIDTH * 3) + (CARD_SPACING * 2)
+    start_x = (CANVAS_WIDTH - total_cards_width) // 2
+    # 将卡片整体向下移一点，避开 Header
+    start_y = (CANVAS_HEIGHT - CARD_HEIGHT) // 2 + 20 
+
+    for i, item in enumerate(raw_data_list):
+        if not item: continue
+
+        # --- 数据解析 ---
+        # [id, title, comp, lyr, arr, date, charts, assetName]
+        m_title = item[1]
+        m_comp = item[2]
+        m_lyr = item[3]
+        m_arr = item[4]
+        m_date = item[5].split(" ")[0]
+        m_charts = item[6]
+        m_asset = item[7]
+
+        current_x = start_x + i * (CARD_WIDTH + CARD_SPACING)
+        current_y = start_y
+        
+        # --- A. 卡片底座 ---
+        draw.rounded_rectangle(
+            (current_x, current_y, current_x + CARD_WIDTH, current_y + CARD_HEIGHT),
+            radius=25, fill=CARD_BG_COLOR, outline=(60, 60, 65), width=2
+        )
+
+        # --- B. 真实封面处理 ---
+        cover_margin = 25
+        cover_size = CARD_WIDTH - (cover_margin * 2)
+        cover_x = current_x + cover_margin
+        cover_y = current_y + cover_margin
+        
+        # 尝试加载图片
+        cover_img = None
+        # 尝试常见的图片后缀
+        possible_exts = [".png", ".jpg", ".jpeg"]
+        found_path = None
+        
+        for ext in possible_exts:
+            p = os.path.join(COVERS_DIR, m_asset + ext)
+            if os.path.exists(p):
+                found_path = p
+                break
+        
+        if found_path:
+            try:
+                original = Image.open(found_path).convert("RGB")
+                # 高质量缩放
+                cover_img = original.resize((cover_size, cover_size), Image.Resampling.LANCZOS)
+                
+                # 制作圆角蒙版 (可选，如果你想让图片也是圆角的)
+                mask = Image.new("L", (cover_size, cover_size), 0)
+                mask_draw = ImageDraw.Draw(mask)
+                mask_draw.rounded_rectangle((0, 0, cover_size, cover_size), radius=10, fill=255)
+                
+                # 粘贴图片
+                image.paste(cover_img, (cover_x, cover_y), mask)
+            except Exception as e:
+                print(f"Error loading image {found_path}: {e}")
+                cover_img = None
+
+        # 如果没加载到图片，绘制占位符
+        if cover_img is None:
+            draw.rounded_rectangle(
+                (cover_x, cover_y, cover_x + cover_size, cover_y + cover_size),
+                radius=10, fill=DEFAULT_COVER_COLOR
+            )
+            # 在占位符中间写个 "NO IMAGE"
+            draw.text((cover_x + cover_size/2, cover_y + cover_size/2), "NO IMAGE", font=font_diff_label, fill=(100,100,100), anchor="mm")
+
+        # --- C. 文本信息 ---
+        text_start_y = cover_y + cover_size + 25
+        center_x = current_x + CARD_WIDTH // 2
+        
+        # 曲名
+        def truncate_text_to_pixel_width(
+            text: str,
+            font: ImageFont.FreeTypeFont,
+            max_width: float,
+            ellipsis: str = "…"
+        ) -> str:
+            """
+            将文本截断到不超过 max_width 像素宽度，最后加上省略号（如果被截断）
+            """
+            if not text:
+                return ""
+
+            # 先检查完整长度
+            full_width = font.getlength(text)
+            if full_width <= max_width:
+                return text
+
+            # 二分查找合适的字符数
+            left, right = 0, len(text)
+            while left < right:
+                mid = (left + right + 1) // 2
+                w = font.getlength(text[:mid] + ellipsis)
+                if w <= max_width:
+                    left = mid
+                else:
+                    right = mid - 1
+
+            truncated = text[:left]
+            if left < len(text):  # 有截断才加省略号
+                truncated += ellipsis
+
+            # 最后微调（极少数字体省略号本身很宽可能超）
+            while font.getlength(truncated) > max_width and len(truncated) > 1:
+                truncated = truncated[:-2] + ellipsis  # 去掉最后一个字符再加…
+
+            return truncated
+        
+        m_title = truncate_text_to_pixel_width(m_title, font_title, CARD_WIDTH - 30)
+
+        draw.text((center_x, text_start_y), m_title, font=font_title, fill="white", anchor="mm")
+        
+        info_gap = 32
+        info_y = text_start_y + 45
+        info_color = (200, 200, 200)
+        
+        def draw_info_line(label, value, y_pos):
+            val_str = str(value) if value else "-"
+            # 如果文字太长可以做截断处理，这里简化处理
+            text = f"{label}: {val_str}"
+            draw.text((center_x, y_pos), text, font=font_info, fill=info_color, anchor="mm")
+
+        draw_info_line("作曲", m_comp, info_y)
+        draw_info_line("作词", m_lyr, info_y + info_gap)
+        draw_info_line("编曲", m_arr, info_y + info_gap * 2)
+        draw_info_line("发布日期", m_date, info_y + info_gap * 3)
+        
+        # --- D. 难度表格 ---
+        grid_y_start = info_y + info_gap * 3 + 50
+        grid_height = 150
+        grid_width = CARD_WIDTH - 30
+        col_width = grid_width / 5
+        grid_x_start = current_x + 15
+        
+        d_names = [c[0].upper() for c in m_charts]
+        d_levels = [str(c[1]) for c in m_charts]
+        d_notes = [c[2] for c in m_charts]
+        
+        for idx in range(len(d_names)):
+            if idx >= 5: break # 最多画5个
+            
+            col_x = grid_x_start + idx * col_width
+            bg_col_color = DIFF_COLORS[idx % len(DIFF_COLORS)]
+            
+            rect_margin = 3
+            
+            # 1. 边框背景
+            draw.rounded_rectangle(
+                (col_x + rect_margin, grid_y_start, col_x + col_width - rect_margin, grid_y_start + grid_height),
+                radius=8, fill=(45, 45, 50), outline=bg_col_color, width=2
+            )
+            
+            # 2. 顶部色块
+            header_h = 35
+            draw.rounded_rectangle(
+                (col_x + rect_margin, grid_y_start, col_x + col_width - rect_margin, grid_y_start + header_h),
+                radius=8, fill=bg_col_color
+            )
+            
+            cx = col_x + col_width / 2
+            
+            # 3. 文字
+            draw.text((cx, grid_y_start + header_h/2), d_names[idx], font=font_diff_label, fill="white", anchor="mm")
+            draw.text((cx, grid_y_start + header_h + 35), d_levels[idx], font=font_diff_val, fill="white", anchor="mm")
+            
+            draw.text((cx, grid_y_start + header_h + 75), "NOTES", font=font_note, fill=(130,130,130), anchor="mm")
+            draw.text((cx, grid_y_start + header_h + 95), str(d_notes[idx]), font=font_note, fill="white", anchor="mm")
+
+    return image
+
+@sv.on_fullmatch(('今日课题'))
+async def send_topic_song(bot, ev: CQEvent):
+    topic_id_list = get_topic_id()
+    # topic_info = "今日的课题曲目为:\n"
+    # for topic_id in topic_id_list:
+    #     topic_info += id_get_song_info(topic_id)[0]
+    img = draw_music_cards_v3(topic_id_list[0],topic_id_list[1],topic_id_list[2])
+    # 发送图片
+    buf = BytesIO()
+    img.save(buf, format='PNG')
+    base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}' #通过BytesIO发送图片，无需生成本地文件
+    await bot.send(ev,f'[CQ:image,file={base64_str}]')
