@@ -10,6 +10,7 @@ import datetime
 import random
 import hashlib
 from openai import OpenAI
+from thefuzz import fuzz
 
 from hoshino.typing import CQEvent, MessageSegment
 from hoshino.util import DailyNumberLimiter
@@ -107,17 +108,20 @@ def save_request(filename,byte):
 
 music_difficulties = ''
 musics = ''
+music_alias_data = ''
 def update_musicdb():
     '''更新乐曲数据库'''
-    global music_difficulties,musics
+    global music_difficulties,musics,music_alias_data
     try:
         music_difficulties_raw = req.get("https://sekai-world.github.io/sekai-master-db-diff/musicDifficulties.json").content
         musics_raw = req.get("https://sekai-world.github.io/sekai-master-db-diff/musics.json").content
         save_request('musicDifficulties.json',music_difficulties_raw)
         save_request('musics.json',musics_raw)
+        music_alias_data = json.load(open(load_path+"\\music_alias.json", "r", encoding="utf-8"))
     except:
         music_difficulties_raw = open(load_path + '\\musicDifficulties.json', encoding='UTF-8').read()
         musics_raw = open(load_path + '\\musics.json', encoding='UTF-8').read()
+        music_alias_data = json.load(open(load_path+"\\music_alias.json", "r", encoding="utf-8"))  # 添加这一行
     music_difficulties = json.loads(music_difficulties_raw)
     musics = json.loads(musics_raw)
 #初始化时尝试更新一次musicdb
@@ -204,6 +208,78 @@ def data_req(url):  #现场请求相关数据，耗时较长，但是数据永�
     temp_res = req.get(url, headers = headers)
     re = json.loads(temp_res.text)
     return re
+
+def find_song_by_query(query, song_data, min_score=40):
+    """
+    根据查询字符串查找乐曲ID和原名。
+    优先级：精确标题 -> 精确别名 -> 相似度标题 -> 相似度别名
+    """
+
+    # 预处理：将查询转为小写,以便进行忽略大小写的精确匹配
+    query_lower = query.lower().strip()
+
+    # --- 阶段 1: 精确匹配 (Exact Match) ---
+
+    # 1.1 完整匹配乐曲名称 (Title)
+    for song in song_data:
+        if song['title'].lower() == query_lower:
+            return song['id'], song['title'], "精确匹配-标题"
+
+    # 1.2 完整匹配别名 (Alias)
+    for song in song_data:
+        # 将别名列表也转为小写比较
+        aliases_lower = [a.lower() for a in song['alias']]
+        if query_lower in aliases_lower:
+            return song['id'], song['title'], "精确匹配-别名"
+
+    # --- 阶段 2: 相似度匹配 (Similarity Match) ---
+    # 如果精确匹配没有结果,我们遍历所有数据计算相似度分数
+
+    best_match = None
+    highest_score = 0
+    match_source = ""
+
+    for song in song_data:
+        # 2.1 计算标题相似度
+        # fuzz.ratio 比较整个字符串的相似度
+        # fuzz.partial_ratio 适合匹配子串 (例如搜 "Tell" 匹配 "Tell Your World")
+        # 这里使用 ratio 以避免太短的词匹配到长标题
+        score_title = fuzz.ratio(query_lower, song['title'].lower())
+
+        # 2.2 计算别名相似度 (取该歌曲所有别名中最高的分数)
+        score_alias = 0
+        if song['alias']:
+            # 找出当前歌曲中与查询最相似的一个别名
+            best_alias_score = 0
+            for alias in song['alias']:
+                s = fuzz.ratio(query_lower, alias.lower())
+                if s > best_alias_score:
+                    best_alias_score = s
+            score_alias = best_alias_score
+
+        # --- 优先级逻辑判断 ---
+        # 题目要求顺序：相似度匹配乐曲名称 → 相似度匹配别名
+
+        # 检查标题分数是否是目前最高的
+        if score_title > highest_score:
+            highest_score = score_title
+            best_match = song
+            match_source = "相似度-标题"
+
+        # 检查别名分数是否是目前最高的
+        # 注意：只有当别名分数 显著高于 标题分数时,或者当前还没有任何匹配时才更新
+        # 如果分数相同,由于上面已经先判断了标题,所以会保留标题的匹配（符合优先级）
+        if score_alias > highest_score:
+            highest_score = score_alias
+            best_match = song
+            match_source = "相似度-别名"
+
+    # --- 返回结果 ---
+    # 只有当相似度超过一定阈值（例如40分）才返回,防止返回完全不相关的结果
+    if best_match and highest_score >= min_score:
+        return best_match['id'], best_match['title'], f"{match_source} ({highest_score})"
+
+    return None, None, "未找到匹配"
 
 # # 遍历账号池对比UID，若已有绑定返回False
 # def a_check(uid,account): #bot, ev: CQEvent
@@ -700,12 +776,13 @@ def download_jackets(music_assetbundleName):
     从在线数据库下载乐曲封面至"/jackets"文件夹内
     :param music_assetbundleName: 封面文件名信息(由musics.json单曲信息储存)
     '''
-    links = f'https://storage.sekai.best/sekai-jp-assets/music/jacket/{music_assetbundleName}_rip/{music_assetbundleName}.png'
+    links = f'https://storage.sekai.best/sekai-jp-assets/music/jacket/{music_assetbundleName}/{music_assetbundleName}.webp'
     try:
         jacket = req.get(links).content
+        image_bytes = BytesIO(jacket)
+        image = Image.open(image_bytes)
         jacket_path = load_path + f"\\jackets\\{music_assetbundleName}.png"
-        with open(jacket_path, 'wb') as f:
-            f.write(jacket)
+        image.save(jacket_path, format="PNG")
         print(f"成功下载 {music_assetbundleName}")
     except Exception as e:
         print(f"获取 {music_assetbundleName} 出错: {e}")
@@ -848,16 +925,21 @@ async def pjsk_song(bot,ev):
     # 判断字符串是否为纯数字
     if command_parts[0].isdigit() == False:
         music_name = command_parts[0]
-        get_song_id_link = f"https://api.unipjsk.com/getsongid/{music_name}" # TODO : UniBot接口已经废弃，需要换到锡纸的接口
-        response = req.get(get_song_id_link)
-        if response.status_code != 200:
-            await bot.send(ev, '查询歌曲信息失败，接口异常。')
+        song_id, original_title, method = find_song_by_query(music_name, music_alias_data)
+        if song_id is None:
+            await bot.send(ev, f'未找到匹配的歌曲: {music_name}')
             return
-        response_json = response.json()
-        if response_json['status'] == 'false':
-            await bot.send(ev, '查询歌曲信息失败，歌曲/别名未找到。')
-            return
-        music_id = response_json['musicId']
+        # get_song_id_link = f"https://api.unipjsk.com/getsongid/{music_name}"
+        # response = req.get(get_song_id_link)
+        # if response.status_code != 200:
+        #     await bot.send(ev, '查询歌曲信息失败，接口异常。')
+        #     return
+        # response_json = response.json()
+        # if response_json['status'] == 'false':
+        #     await bot.send(ev, '查询歌曲信息失败，歌曲/别名未找到。')
+        #     return
+        # music_id = response_json['musicId']
+        music_id = int(song_id)
     else:
         music_id = int(command_parts[0])
     music_str = id_get_song_info(music_id)[0]
@@ -1194,7 +1276,7 @@ async def picsigner(bot, ev: CQEvent, image_data):
             messages=[
                 {"role": "system", "content": """
                     你正在作为一个中间件模型使用。
-                    用户将会输入一张游玩Project SEKAI游戏的成绩图。难度位于左上角曲目封面和标题的下方，难度名称可以是MASTER、EXPERT、HARD、NORMAL、EASY中的一个。难度值为1~38之间的数值。
+                    用户将会输入一张游玩Project SEKAI游戏的成绩图。难度位于左上角曲目封面和标题的下方，难度名称可以是APPEND、MASTER、EXPERT、HARD、NORMAL、EASY中的一个。难度值为1~38之间的数值。
                     用户输入的图片中应当包含的数值为：Perfect、Great、Good、Bad、Miss、Combo。
                     请以以下JSON格式输出用户本次游玩的信息：
                     {
@@ -1252,15 +1334,17 @@ async def picsigner(bot, ev: CQEvent, image_data):
         if perfect == combo:
             await bot.send(ev, f'恭喜！您今日的课题取得了ALL PERFECT！额外奖励10积分！')
             extra_bonus = 10
-        elif (great == 1 and perfect == combo - 1) or (good == 1 and perfect == combo - 1):
-            await bot.send(ev, '您今日的课题有一个好。。。额外奖励9积分！')
+        non_perfect_count = perfect - combo
+        if non_perfect_count == 1:
             extra_bonus = 9
-        elif bad == 1 and perfect == combo - 1:
-            await bot.send(ev, '您今日的课题有一个坏。。。额外奖励9积分！')
-            extra_bonus = 9
-        elif miss == 1 and perfect == combo - 1:
-            await bot.send(ev, '您今日的课题有一个丢。。。额外奖励9积分！')
-            extra_bonus = 9
+            if great == 1:
+                await bot.send(ev, '您今日的课题有一个好。。。额外奖励9积分！')
+            if good == 1:
+                await bot.send(ev, '您今日的课题有一个中。。。额外奖励9积分！')
+            if bad == 1:
+                await bot.send(ev, '您今日的课题有一个坏。。。额外奖励9积分！')
+            if miss == 1:
+                await bot.send(ev, '您今日的课题有一个丢。。。额外奖励9积分！')
         await qiandao(bot, ev, extra_bonus)
     else:
         await bot.send(ev, '您游玩的不是今日的课题曲，请先游玩今日课题曲再来发送课题曲成绩图进行签到~')
@@ -1485,6 +1569,11 @@ def draw_music_cards_v3(id1: int, id2: int, id3: int):
         cover_y = current_y + cover_margin
         
         # 尝试加载图片
+
+        #检查文件music_assetbundleName是否存在,若不存在则下载
+        if not os.path.exists(f"{load_path}\\jackets\\{m_asset}.png"):
+            download_jackets(m_asset)
+
         cover_img = None
         # 尝试常见的图片后缀
         possible_exts = [".png", ".jpg", ".jpeg"]
