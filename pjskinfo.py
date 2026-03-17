@@ -9,6 +9,7 @@ import pymysql
 import datetime
 import random
 import hashlib
+import csv
 from openai import OpenAI
 from thefuzz import fuzz
 
@@ -173,18 +174,154 @@ def check_topic_song(id):
         else:
             return False
         
+def update_today_topic():
+    '''
+    更新今日课题曲，每天随机选择 3 首不同的歌曲
+    '''
+    # 读取所有歌曲 ID
+    with open(load_path + "\\musics.json", 'r', encoding='utf-8') as f:
+        musics = json.load(f)
+    
+    # 获取所有歌曲 ID 列表
+    all_song_ids = [music['id'] for music in musics]
+    
+    # 随机选择 3 首不同的歌曲
+    selected_ids = random.sample(all_song_ids, 3)
+    
+    # 获取今日日期
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    
+    # 构建新的课题数据
+    today_topic = [{"id": song_id} for song_id in selected_ids]
+    today_topic_data = {
+        "date": today,
+        "songs": today_topic
+    }
+    
+    # 写入文件
+    with open(load_path + "\\today_topic.json", 'w', encoding='utf-8') as f:
+        json.dump(today_topic_data, f, ensure_ascii=False)
+    
+    return selected_ids
+
 def get_topic_id():
     '''
-    获取今日课题曲  
-    return: 包含今日课题曲id的list
+    获取今日课题曲
+    return: 包含今日课题曲 id 的 list
     '''
-    today_topic_list = []
-    with open(load_path + f"\\today_topic.json", 'r', encoding='utf-8') as f:
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    topic_file = load_path + "\\today_topic.json"
+    
+    # 检查文件是否存在
+    if not os.path.exists(topic_file):
+        # 文件不存在，先尝试生成生日课题
+        birthday_ids = update_birthday_topic()
+        if birthday_ids:
+            return birthday_ids
+        # 没有角色过生日，生成普通课题
+        return update_today_topic()
+    
+    with open(topic_file, 'r', encoding='utf-8') as f:
         today_topic = json.load(f)
-        for topic in today_topic:
-            today_topic_list.append(topic['id'])
-        return today_topic_list
-            
+    
+    # 检查日期是否匹配
+    saved_date = today_topic.get("date", "")
+    if saved_date != today:
+        # 日期不匹配，先尝试生成生日课题
+        birthday_ids = update_birthday_topic()
+        if birthday_ids:
+            return birthday_ids
+        # 没有角色过生日，生成普通课题
+        return update_today_topic()
+    
+    # 日期匹配，返回保存的歌曲 ID
+    songs = today_topic.get("songs", [])
+    today_topic_list = [song['id'] for song in songs]
+    return today_topic_list
+
+
+
+def get_today_birthday_character():
+    """
+    获取今日生日的角色和团队
+    return: (角色名列表，团队列表)，如果没有则返回 (空列表，空列表)
+    """
+    today = datetime.datetime.now()
+    today_str = today.strftime("%m-%d")
+    birthday_characters = []
+    birthday_units = []
+    with open(load_path + "\\birthday.csv", 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = row.get("角色名", "").strip()
+            date = row.get("生日", "").strip()
+            unit = row.get("团队", "").strip()
+            if date == today_str and name:
+                birthday_characters.append(name)
+                if unit:
+                    birthday_units.append(unit)
+
+    return birthday_characters, birthday_units
+
+def get_unit_songs(unit_tag):
+    """
+    获取指定团队的歌曲 ID 列表
+    :params unit_tag: 团队标签
+    return: 歌曲 ID 列表
+    """
+    with open(load_path + "\\musicTags.json", 'r', encoding='utf-8') as f:
+        music_tags = json.load(f)
+    
+    song_ids = set()
+    for item in music_tags:
+        if item['musicTag'] == unit_tag:
+            song_ids.add(item['musicId'])
+    
+    return list(song_ids)
+
+def update_birthday_topic():
+    """
+    更新生日课题曲，仅抽取生日角色所在团队的曲目
+    return: 选中的歌曲 ID 列表，如果没有角色过生日则返回 None
+    """
+    # 获取今日生日的角色
+    birthday_chars, birthday_units = get_today_birthday_character()
+    
+    if not birthday_chars:
+        return None
+    
+    # 收集所有生日角色的团队歌曲
+    unit_song_ids = set()
+    for unit_tag in birthday_units:
+        unit_songs = get_unit_songs(unit_tag)
+        unit_song_ids.update(unit_songs)
+    
+    if not unit_song_ids:
+        return None
+    
+    # 从团队歌曲中随机选择 3 首
+    import random
+    selected_ids = random.sample(list(unit_song_ids), min(3, len(unit_song_ids)))
+    
+    # 获取今日日期
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    
+    # 构建课题数据
+    today_topic = [{"id": song_id} for song_id in selected_ids]
+    today_topic_data = {
+        "date": today,
+        "songs": today_topic,
+        "is_birthday": True,
+        "birthday_characters": birthday_chars
+    }
+    
+    # 写入文件
+    with open(load_path + "\\today_topic.json", 'w', encoding='utf-8') as f:
+        json.dump(today_topic_data, f, ensure_ascii=False)
+    
+    return selected_ids
+
+
 # 判断Note数是否等于给出的乐曲id的总Note数
 def check_note_song(id, note):
     '''
@@ -1718,12 +1855,22 @@ def draw_music_cards_v3(id1: int, id2: int, id3: int):
 @sv.on_fullmatch(('今日课题'))
 async def send_topic_song(bot, ev: CQEvent):
     topic_id_list = get_topic_id()
-    # topic_info = "今日的课题曲目为:\n"
-    # for topic_id in topic_id_list:
-    #     topic_info += id_get_song_info(topic_id)[0]
+
+    # 检查是否是生日课题
+    topic_file = load_path + "\\today_topic.json"
+    birthday_msg = ""
+    if os.path.exists(topic_file):
+        with open(topic_file, 'r', encoding='utf-8') as f:
+            today_topic = json.load(f)
+        if today_topic.get("is_birthday"):
+            birthday_chars = today_topic.get("birthday_characters", [])
+            if birthday_chars:
+                chars_str = ' / '.join(birthday_chars)
+                birthday_msg = "🎂 今日是 " + chars_str + " 的生日！\n"
+
     img = draw_music_cards_v3(topic_id_list[0],topic_id_list[1],topic_id_list[2])
     # 发送图片
     buf = BytesIO()
     img.save(buf, format='PNG')
-    base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}' #通过BytesIO发送图片，无需生成本地文件
-    await bot.send(ev,f'[CQ:image,file={base64_str}]')
+    base64_str = f'base64://{base64.b64encode(buf.getvalue()).decode()}' #通过 BytesIO 发送图片，无需生成本地文件
+    await bot.send(ev, birthday_msg + f'[CQ:image,file={base64_str}]')
