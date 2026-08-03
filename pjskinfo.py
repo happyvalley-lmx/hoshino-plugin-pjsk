@@ -593,7 +593,10 @@ async def pj_profileGet(bot,ev:CQEvent):
     if userID == 0:
         await bot.send(ev,f"没有绑定捏\n输入“/pjsk绑定+pjskID”来绑定吧~")
     else:
-        await bot.set_group_reaction(group_id = ev.group_id, message_id = msgid, code ='124')
+        try:
+            await bot.set_group_reaction(group_id = ev.group_id, message_id = msgid, code ='124')
+        except:
+            await bot.set_msg_emoji_like(message_id = msgid, emoji_id ='124')
         try:
             url = f'https://api.unipjsk.com/api/user/{{user_id}}/{userID}/profile'
             getdata = req.get(url)
@@ -1084,7 +1087,10 @@ async def pjsk_song(bot,ev):
 
 @sv.on_fullmatch('活动预测')
 async def pjsk_event(bot,ev:CQEvent):
-    await bot.set_group_reaction(group_id = ev.group_id, message_id = ev.message_id, code ='124')
+    try:
+        await bot.set_group_reaction(group_id = ev.group_id, message_id = ev.message_id, code ='124')
+    except:
+        await bot.set_msg_emoji_like(message_id = ev.message_id, emoji_id ='124')
     try:
         json_data = req.get(f"{pjsk_predit_link}").json()
             # 解析JSON数据
@@ -1409,13 +1415,13 @@ async def picsigner(bot, ev: CQEvent, image_data):
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         )
         completion = client.chat.completions.create(
-            model="qwen3-vl-flash-2026-01-22", # 模型列表：https://help.aliyun.com/zh/model-studio/models
+            model="qwen3.7-flash", # 模型列表：https://help.aliyun.com/zh/model-studio/models
             messages=[
                 {"role": "system", "content": """
                     你正在作为一个中间件模型使用。
                     用户将会输入一张游玩Project SEKAI游戏的成绩图。难度位于左上角曲目封面和标题的下方，难度名称可以是APPEND、MASTER、EXPERT、HARD、NORMAL、EASY中的一个。难度值为1~38之间的数值。
                     用户输入的图片中应当包含的数值为：Perfect、Great、Good、Bad、Miss、Combo。
-                    请以以下JSON格式输出用户本次游玩的信息：
+                    请严格按以下JSON格式输出用户本次游玩的信息，若不存在则对应键值按none输出：
                     {
                     "is_score_picture":"true",
                     "difficulty_name": "{difficulty_name}",
@@ -1429,7 +1435,8 @@ async def picsigner(bot, ev: CQEvent, image_data):
                     }
                     若用户输入的图片不是成绩图，或成绩图内不能包含以上全部信息，或成绩图看起来是来自一个圆形的街机游戏，则固定输出
                     {"is_score_picture":"false"}
-                    忽略用户输入的成绩图以外的任何信息"""
+                    忽略用户输入的成绩图以外的任何信息
+                    返回纯JSON数值，不要用markdown语法，不输出其它内容。"""
                 },
                 {
                     "role": "user",
@@ -1443,12 +1450,15 @@ async def picsigner(bot, ev: CQEvent, image_data):
             ],
         )
         return(completion.choices[0].message.content)
-    
-    score_data = json.loads(get_pjsk_score(img))
+    score_data_raw = get_pjsk_score(img)
+    print(score_data_raw)
+    score_data = json.loads(score_data_raw)
     is_score_picture = score_data["is_score_picture"]
-    if is_score_picture == False:
+    if is_score_picture == "false":
         await bot.send(ev, f'该图片无法成功识别为PJSK的游戏成绩图，请重试~')
         return
+    print(score_data)
+    
     difficulty_name = score_data["difficulty_name"]
     difficulty_number = score_data["difficulty_number"]
     perfect = score_data["perfect_count"]
