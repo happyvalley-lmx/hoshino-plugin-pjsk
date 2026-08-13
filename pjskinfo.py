@@ -1481,7 +1481,7 @@ async def picsigner(bot, ev: CQEvent, image_data):
         if perfect == combo:
             await bot.send(ev, f'恭喜！您今日的课题取得了ALL PERFECT！额外奖励10积分！')
             extra_bonus = 10
-        non_perfect_count = perfect - combo
+        non_perfect_count = total_notes - perfect
         if non_perfect_count == 1:
             extra_bonus = 9
             if great == 1:
