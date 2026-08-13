@@ -173,21 +173,53 @@ def check_topic_song(id):
                 return True
         else:
             return False
-        
+
+
+TOPIC_TIERS = [
+    ('简单', 0, 24),
+    ('中等', 25, 30),
+    ('困难', 31, 38),
+]
+TOPIC_DIFFS = ['expert', 'master', 'append']  # 只参考这三个难度的等级数值
+
+
+def sample_topic_songs(candidate_ids=None):
+    '''按简单/中等/困难三档（等级区间）各抽 1 首，返回去重后的 musicId 列表。
+    candidate_ids: 可选，限定候选曲（生日课题传入团队曲目 id 集合）。
+    '''
+    chosen_ids = []
+    for _, min_lv, max_lv in TOPIC_TIERS:
+        pool = set()
+        for chart in music_difficulties:
+            if chart['musicDifficulty'] not in TOPIC_DIFFS:
+                continue
+            if not (min_lv <= chart['playLevel'] <= max_lv):
+                continue
+            mid = chart['musicId']
+            if candidate_ids is not None and mid not in candidate_ids:
+                continue
+            if mid in chosen_ids:
+                continue
+            pool.add(mid)
+        # 该档在限定候选内抽空时，回退到全曲库该档补足
+        if not pool:
+            for chart in music_difficulties:
+                if (chart['musicDifficulty'] in TOPIC_DIFFS
+                        and min_lv <= chart['playLevel'] <= max_lv
+                        and chart['musicId'] not in chosen_ids):
+                    pool.add(chart['musicId'])
+        if pool:
+            chosen_ids.append(random.choice(list(pool)))
+    return chosen_ids
+
+
 def update_today_topic():
     '''
-    更新今日课题曲，每天随机选择 3 首不同的歌曲
+    更新今日课题曲，按简单/中等/困难三档各抽 1 首
     '''
-    # 读取所有歌曲 ID
-    with open(load_path + "\\musics.json", 'r', encoding='utf-8') as f:
-        musics = json.load(f)
-    
-    # 获取所有歌曲 ID 列表
-    all_song_ids = [music['id'] for music in musics]
-    
-    # 随机选择 3 首不同的歌曲
-    selected_ids = random.sample(all_song_ids, 3)
-    
+    # 按三档各抽 1 首不同的歌曲
+    selected_ids = sample_topic_songs()
+
     # 获取今日日期
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     
@@ -299,9 +331,8 @@ def update_birthday_topic():
     if not unit_song_ids:
         return None
     
-    # 从团队歌曲中随机选择 3 首
-    import random
-    selected_ids = random.sample(list(unit_song_ids), min(3, len(unit_song_ids)))
+    # 按简单/中等/困难三档各抽 1 首（限定生日团队曲目，不足时回退全库）
+    selected_ids = sample_topic_songs(unit_song_ids)
     
     # 获取今日日期
     today = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -1590,16 +1621,6 @@ async def qiandao(bot, ev: CQEvent, extra_bonus=0):
         await bot.send(ev, '错误:' + str(e))
     db_bot.close()
 
-# TODO: 每日刷新随机课题曲
-@sv.scheduled_job('interval', minutes=1440)
-async def daily_refresh_topic_song():
-    math_musics_hard = math_game(38,31)
-    math_musics_normal = math_game(31,26)
-    math_musics_easy = math_game(26,1)
-    song_hard = random.sample(math_musics_hard,1)
-    song_normal = random.sample(math_musics_normal,1)
-    song_ez = random.sample(math_musics_easy,1)
-
 def draw_music_cards_v3(id1: int, id2: int, id3: int):
     """
     绘制包含真实封面、页眉、页脚的音乐游戏课题曲图片。
@@ -1621,6 +1642,13 @@ def draw_music_cards_v3(id1: int, id2: int, id3: int):
     CARD_HEIGHT = 860  # 稍微改短一点
     CARD_SPACING = 80  # 稍微紧凑一点
     CARD_BG_COLOR = (40, 40, 45)
+
+    # 三档难度主题色（简单/中等/困难），用于卡片边框、顶部色带与档位徽章
+    TIER_THEMES = [
+        {'name': '简单', 'color': (76, 175, 80)},    # 绿
+        {'name': '中等', 'color': (255, 152, 0)},    # 橙
+        {'name': '困难', 'color': (244, 67, 54)},    # 红
+    ]
     
     # 字体加载辅助函数
     def load_font(size, bold=False):
@@ -1643,6 +1671,15 @@ def draw_music_cards_v3(id1: int, id2: int, id3: int):
     DIFF_COLORS = [
         (76, 175, 80), (33, 150, 243), (255, 152, 0), (244, 67, 54), (156, 39, 176)
     ]
+    # 按难度名映射颜色（APPEND 专属粉色）
+    DIFF_COLOR_MAP = {
+        'EASY':   (76, 175, 80),
+        'NORMAL': (33, 150, 243),
+        'HARD':   (255, 152, 0),
+        'EXPERT': (244, 67, 54),
+        'MASTER': (156, 39, 176),
+        'APPEND': (255, 64, 129),
+    }
 
     # 创建画布
     image = Image.new('RGB', (CANVAS_WIDTH, CANVAS_HEIGHT), BG_COLOR)
@@ -1702,11 +1739,13 @@ def draw_music_cards_v3(id1: int, id2: int, id3: int):
 
         current_x = start_x + i * (CARD_WIDTH + CARD_SPACING)
         current_y = start_y
-        
+
+        tier = TIER_THEMES[i]  # 当前卡片对应的难度档
+
         # --- A. 卡片底座 ---
         draw.rounded_rectangle(
             (current_x, current_y, current_x + CARD_WIDTH, current_y + CARD_HEIGHT),
-            radius=25, fill=CARD_BG_COLOR, outline=(60, 60, 65), width=2
+            radius=25, fill=CARD_BG_COLOR, outline=tier['color'], width=3
         )
 
         # --- B. 真实封面处理 ---
@@ -1757,6 +1796,20 @@ def draw_music_cards_v3(id1: int, id2: int, id3: int):
             )
             # 在占位符中间写个 "NO IMAGE"
             draw.text((cover_x + cover_size/2, cover_y + cover_size/2), "NO IMAGE", font=font_diff_label, fill=(100,100,100), anchor="mm")
+
+        # --- B2. 难度档徽章（封面右上角）---
+        badge_text = tier['name']
+        badge_font = font_info  # 22
+        badge_bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
+        badge_w = (badge_bbox[2] - badge_bbox[0]) + 24  # 左右各留 12px 内边距
+        badge_h = 34
+        badge_x = cover_x + cover_size - badge_w - 10
+        badge_y = cover_y + 10
+        draw.rounded_rectangle(
+            (badge_x, badge_y, badge_x + badge_w, badge_y + badge_h),
+            radius=badge_h // 2, fill=tier['color']
+        )
+        draw.text((badge_x + badge_w / 2, badge_y + badge_h / 2), badge_text, font=badge_font, fill="white", anchor="mm")
 
         # --- C. 文本信息 ---
         text_start_y = cover_y + cover_size + 25
@@ -1823,7 +1876,7 @@ def draw_music_cards_v3(id1: int, id2: int, id3: int):
         grid_y_start = info_y + info_gap * 3 + 50
         grid_height = 150
         grid_width = CARD_WIDTH - 30
-        col_width = grid_width / 5
+        col_width = grid_width / len(m_charts)  # 动态列数，兼容 APPEND 第 6 列
         grid_x_start = current_x + 15
         
         d_names = [c[0].upper() for c in m_charts]
@@ -1831,10 +1884,8 @@ def draw_music_cards_v3(id1: int, id2: int, id3: int):
         d_notes = [c[2] for c in m_charts]
         
         for idx in range(len(d_names)):
-            if idx >= 5: break # 最多画5个
-            
             col_x = grid_x_start + idx * col_width
-            bg_col_color = DIFF_COLORS[idx % len(DIFF_COLORS)]
+            bg_col_color = DIFF_COLOR_MAP.get(d_names[idx], DIFF_COLORS[idx % len(DIFF_COLORS)])
             
             rect_margin = 3
             
